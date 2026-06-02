@@ -1,0 +1,21 @@
+# Example building-technical precheck rule (base_assumptions §12.2; category §12.3
+# PL/building-technical). Verbatim shape from the spec example.
+id: PL-WT-SETBACK-GRANICA-001
+title: Minimalna odleglosc budynku od granicy dzialki
+jurisdiction: PL
+valid_from: 2024-01-01
+valid_to: null
+source_reference: "rulesets/PL/building-technical/sources.md#wt-setback"
+inputs:
+  - building_wall_type
+  - parcel_boundary
+  - planning_override
+  - neighboring_conditions
+outputs:
+  - required_setback_m
+  - applicability
+  - confidence
+logic: declarative_expression_or_function_ref
+# Default setbacks (metres) by wall type; the Phase 8 engine selects + applies.
+default_setback_with_windows_m: 4.0
+default_setback_without_windows_m: 3.0

@@ -1,7 +1,8 @@
-"""MCP server for Claude Code (Phase 2).
+"""Thin FastMCP server for Claude Code + hot-reload backbone (Phase 2).
 
-Stub application package. Wiring is deferred to its phase in
-AGENTS/IMPLEMENTATION_PLAN.md; exists so the uv workspace resolves.
+Exposes the 20 public tools (base_assumptions §10.3), resource templates (§10.4) and
+prompts (§10.5) as typed stubs, delegating all domain work to the reloadable
+``usecases`` module so hot-reload never touches the transport (Phase 0.5 / §2.4).
 """
 
 __version__ = "0.1.0"

@@ -1,0 +1,21 @@
+# Example planning rule (base_assumptions §12.2 format, category §12.3 PL/planning).
+# Loaded fresh by plot_rules.load_rulesets so an edit here is reflected live via
+# hot-reload (Phase 2) without restarting the MCP server.
+id: PL-PLAN-MN-COVERAGE-001
+title: Maksymalna powierzchnia zabudowy dla zabudowy MN
+jurisdiction: PL
+valid_from: 2024-01-01
+valid_to: null
+source_reference: "rulesets/PL/planning/sources.md#mpzp-mn-coverage"
+inputs:
+  - zone_symbol
+  - parcel_area_m2
+  - planning_max_coverage_ratio
+outputs:
+  - max_building_footprint_m2
+  - applicability
+  - confidence
+# Declarative expression; the Phase 8 engine evaluates it. Phase 2 only loads it.
+logic: "parcel_area_m2 * planning_max_coverage_ratio"
+# default_max_coverage_ratio is the value the hot-reload proof test edits live.
+default_max_coverage_ratio: 0.30

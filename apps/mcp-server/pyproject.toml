@@ -1,13 +1,28 @@
-# plot-mcp-server — workspace member (app entry point). Stub; implementation deferred to a later phase.
+# plot-mcp-server — thin FastMCP server + hot-reload backbone (Phase 2).
 [project]
 name = "plot-mcp-server"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["plot-shared", "plot-domain"]
+dependencies = [
+    # MCP Python SDK (FastMCP) — Phase 0.1 "Allowed imports / APIs".
+    "mcp[cli]>=1.2",
+    # ASGI host so the HTTP API + MCP can share a process (Phase 0.1 Starlette mount).
+    "starlette>=0.37",
+    "uvicorn>=0.30",
+    # Dev hot-reload file watcher (Phase 0.4 / Phase 2).
+    "watchfiles>=0.22",
+    # Ruleset YAML loading (base_assumptions §12.2).
+    "pyyaml>=6.0",
+    # Workspace deps the server delegates to.
+    "plot-shared",
+    "plot-domain",
+    "plot-rules",
+]
 
 [tool.uv.sources]
 plot-shared = { workspace = true }
 plot-domain = { workspace = true }
+plot-rules = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

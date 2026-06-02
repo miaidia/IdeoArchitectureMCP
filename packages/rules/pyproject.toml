@@ -1,9 +1,12 @@
-# plot-rules — workspace member. Stub package (no runtime code yet); deferred to a later phase.
+# plot-rules — declarative versioned ruleset loader (Phase 2 backbone; engine in Phase 8).
 [project]
 name = "plot-rules"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    # Rulesets are versioned YAML files (base_assumptions §12.2) loaded fresh in dev.
+    "pyyaml>=6.0",
+]
 
 [build-system]
 requires = ["hatchling"]
