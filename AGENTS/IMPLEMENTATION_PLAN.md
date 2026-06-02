@@ -509,7 +509,7 @@ Also available (verify at impl time): `GetParcelByIdOrNr`, `GetRegionById`, `Get
 1. **Doc conformance:** every MCP usage matches Phase 0.1/0.2 (no invented decorators/kwargs); ULDK calls match Phase 0.3; spatial calls match Phase 0.4.
 2. **Anti-pattern greps:**
    - `git grep -nE "(GetParcelBy|uldk\.gugik)"` → only in the ULDK connector.
-   - Tool count: `tools/list` returns ≤ ~22 (21 public + optional `dev_reload`) — guards §21 "hundreds of tools".
+   - Tool count: `tools/list` returns **22 public tools** + dev-gated tools. Baseline = the 20 of §10.3; the meta-features added two stable, well-described public tools — `map_preview` (Phase 3, inline-image verification channel) and `propose_layout` (Phase 4, generative design-feasibility channel). Dev-only (gated by `dev_hot_reload`): `dev_reload`, `selfimprove_run`. So `len(tools)` = 22 (prod) / 24 (dev). This is still a "minimal, stable, well-described" surface (§10.1) — guards §21 "hundreds of tools". Phases 5–13 must NOT add public tools; they implement the real logic behind the existing 22.
    - `git grep -nE "valid_from"` present in every `rulesets/PL/**/*.yaml` (no hardcoded constants without dates).
    - `git grep -niE "TODO|FIXME|HACK"` triaged.
    - No `degrees`/EPSG:4326 buffering in `packages/geo` (metric-CRS guard).

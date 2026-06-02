@@ -52,6 +52,8 @@ PUBLIC_TOOLS = {
     "diagnostics_run",
     # Phase 3 §3.1.3: inline map-preview / verify tool (image content block).
     "map_preview",
+    # Phase 4 §4.1.C: generative drawing design-feasibility tool (image + structured).
+    "propose_layout",
 }
 
 
@@ -72,31 +74,35 @@ def _load_server(monkeypatch: pytest.MonkeyPatch, *, dev_hot_reload: bool):
 
 
 @pytest.mark.anyio
-async def test_lists_20_public_tools_dev_off(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_lists_public_tools_dev_off(monkeypatch: pytest.MonkeyPatch) -> None:
     mcp = _load_server(monkeypatch, dev_hot_reload=False)
     async with create_connected_server_and_client_session(mcp) as client:
         result = await client.list_tools()
         names = {t.name for t in result.tools}
     assert PUBLIC_TOOLS <= names, f"missing: {PUBLIC_TOOLS - names}"
     assert "dev_reload" not in names, "dev_reload must be absent when dev_hot_reload=False"
-    # 20 §10.3 tools + Phase 3 map_preview = 21 public tools.
-    assert len(names) == 21
+    assert "selfimprove_run" not in names, "selfimprove_run must be absent when dev off"
+    # 20 §10.3 tools + Phase 3 map_preview + Phase 4 propose_layout = 22 public tools.
+    assert len(names) == 22
 
 
 @pytest.mark.anyio
-async def test_dev_reload_present_when_dev_on(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_dev_tools_present_when_dev_on(monkeypatch: pytest.MonkeyPatch) -> None:
     mcp = _load_server(monkeypatch, dev_hot_reload=True)
     async with create_connected_server_and_client_session(mcp) as client:
         names = {t.name for t in (await client.list_tools()).tools}
     assert "dev_reload" in names
+    assert "selfimprove_run" in names
     assert PUBLIC_TOOLS <= names
-    # 21 public + dev_reload = 22 when dev_hot_reload=True.
-    assert len(names) == 22
+    # 22 public + dev_reload + selfimprove_run = 24 when dev_hot_reload=True (≤ ~22 guard
+    # applies to the PRODUCTION public surface; dev tools are dev-only).
+    assert len(names) == 24
 
 
-# map_preview returns an MCP image content block (structured_output=False), so it
-# intentionally has no outputSchema (Phase 3 §3.1.3); every other tool must have one.
-_NO_OUTPUT_SCHEMA = {"map_preview"}
+# map_preview returns an MCP image content block and propose_layout returns a
+# CallToolResult (image + structuredContent), both structured_output=False, so they
+# intentionally have no outputSchema; every other tool must have one.
+_NO_OUTPUT_SCHEMA = {"map_preview", "propose_layout"}
 
 
 @pytest.mark.anyio

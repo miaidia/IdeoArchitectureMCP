@@ -362,6 +362,84 @@ def _connector_health_stub() -> list[dict[str, Any]]:
     ]
 
 
+# --------------------------------------------------------------------------- #
+# Phase 4 generative drawing loop wiring (§4.1.C). propose_layout validates a typed
+# LayoutProposal against hard constraints, renders it, scores+critiques it, and returns
+# the structured result; the server inlines the PNG image content block so the model
+# SEES its drawing (reuses the Phase 3 image path). Geometry is the Phase 3 sample
+# parcel/envelope/constraints until Phase 7 supplies real analysis geometry.
+# --------------------------------------------------------------------------- #
+def _drawing_context(ruleset_dir: str | None = None) -> Any:
+    """Build an AnalysisContext from the Phase 3 sample geometry + loaded rules (§4.1.C)."""
+    from plot_agent import AnalysisContext
+    from plot_reports.preview import sample_preview_layers
+    from plot_reports.render import LayerRole
+
+    layers = sample_preview_layers()
+    by_role: dict[Any, list[Any]] = {}
+    for layer in layers:
+        by_role.setdefault(layer.role, []).extend(layer.shapely_geometries())
+    parcel = by_role[LayerRole.PARCEL][0]
+    envelope = by_role[LayerRole.BUILDABLE_ENVELOPE][0]
+    hard = by_role.get(LayerRole.NO_BUILD, [])
+    soft = by_role.get(LayerRole.CONSTRAINT_SOFT, [])
+    return AnalysisContext.with_loaded_rules(
+        parcel=parcel,
+        buildable_envelope=envelope,
+        ruleset_dir=ruleset_dir or "rulesets/PL",
+        hard_constraints=list(hard),
+        soft_constraints=list(soft),
+    )
+
+
+def propose_layout_render(proposal_payload: dict[str, Any]) -> dict[str, Any]:
+    """Validate + render + score + critique a typed LayoutProposal (§4.1.C / §4.4).
+
+    Returns a dict with the rendered PNG bytes (the server inlines them as image content)
+    plus structured ``{score, critique, accepted, violations}``. The proposal is parsed
+    by Pydantic (typed DATA, never trusted free-form — NFR-SEC-003); a hard-violating
+    proposal returns ``accepted=False`` regardless of its score (§14.2).
+    """
+    from plot_agent.drawing import DrawingLoop, LayoutProposal
+
+    context = _drawing_context()
+    # Parse/validate the proposal — malformed/out-of-range input fails here (typed guard).
+    proposal = LayoutProposal.model_validate(proposal_payload)
+    loop = DrawingLoop(context=context)
+    result = loop.iterate(proposal)
+    return {
+        "png_bytes": result.render_image_bytes,
+        "mime_type": result.render_mime,
+        "accepted": result.accepted,
+        "valid": result.score.valid,
+        "score": result.score.to_dict(),
+        "critique": result.critique.to_dict(),
+        "violations": [v.to_dict() for v in result.score.violations],
+        "artifact_uri": result.artifact_uri,
+        # Audit entry (F-0446) recorded inside the loop; surface its summary here.
+        "audit": loop.audit_log[-1].to_dict() if loop.audit_log else None,
+        "note": "Footprint validated against hard constraints BEFORE scoring (§14.2).",
+    }
+
+
+def selfimprove_run(ruleset_dir: str | None = None) -> dict[str, Any]:
+    """[dev] Run the golden scenarios and return the before/after Verdict (§4.1.C).
+
+    Within one call no external edit happens between snapshots, so the verdict is
+    all-``unchanged`` by construction; the value is the structured before/after scores +
+    screenshot artifact uris the dev-loop produces (the regression signal is exercised
+    when Claude Code edits code/rulesets between snapshots in a real session).
+    """
+    from plot_agent.selfimprove import DevLoop, sample_scenarios
+
+    loop = DevLoop(scenarios=sample_scenarios(), ruleset_dir=ruleset_dir or "rulesets/PL")
+    loop.snapshot_before()
+    loop.reload()
+    loop.snapshot_after()
+    verdict = loop.verdict(persist_screenshots=True)
+    return verdict.to_dict()
+
+
 # Keep example builders importable for stubs that need fully-typed objects later.
 def _example_source() -> SourceRecord:  # pragma: no cover - helper for future phases
     from plot_domain.enums import (

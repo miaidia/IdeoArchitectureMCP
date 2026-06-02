@@ -1,9 +1,27 @@
-# plot-agent — workspace member. Stub package (no runtime code yet); deferred to a later phase.
+# plot-agent — orchestration layer: self-improvement dev-loop + generative drawing loop (Phase 4).
 [project]
 name = "plot-agent"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = []
+# plot_agent is the orchestration layer (IMPLEMENTATION_PLAN.md Phase 4 §4.4): it MAY
+# depend on domain/shared/rules/reports but MUST NOT import plot_connectors (no cycle).
+dependencies = [
+    # Vector geometry 2.x for footprint/envelope intersection + area (Phase 0.4).
+    "shapely>=2.0",
+    # Typed, validated proposals + scores (Phase 0.4 "Schemas/validation").
+    "pydantic>=2",
+    # Workspace deps (orchestration layer).
+    "plot-domain",
+    "plot-shared",
+    "plot-rules",
+    "plot-reports",
+]
+
+[tool.uv.sources]
+plot-domain = { workspace = true }
+plot-shared = { workspace = true }
+plot-rules = { workspace = true }
+plot-reports = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

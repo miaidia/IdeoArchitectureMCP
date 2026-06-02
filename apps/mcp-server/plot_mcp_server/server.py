@@ -1,8 +1,10 @@
-"""Thin FastMCP server for the Plot Analyzer (Phase 2 §2.1, extended in Phase 3 §3.1.3).
+"""Thin FastMCP server for the Plot Analyzer (Phase 2 §2.1, extended in Phase 3/4).
 
-Exposes the 20 §10.3 analysis tools plus the Phase 3 ``map_preview`` verify tool
-(21 public total), resource templates (§10.4) and prompts (§10.5). Most are typed
-STUBS delegating to the reloadable ``usecases`` module via ``AppContext``
+Exposes the 20 §10.3 analysis tools plus the Phase 3 ``map_preview`` verify tool and the
+Phase 4 ``propose_layout`` design-feasibility tool (22 public total; ≤ ~22 guard, §21),
+resource templates (§10.4) and prompts (§10.5). Dev-only tools (``dev_reload``,
+``selfimprove_run``) are registered ONLY when ``dev_hot_reload`` is True → 24 with dev on.
+Most are typed STUBS delegating to the reloadable ``usecases`` module via ``AppContext``
 (``runtime.py``) so hot-reload never touches the transport (Phase 0.5 / §2.4). The
 ``map_preview`` tool + ``analysis://{id}/map-preview.png`` resource are wired to the
 real Phase 3 renderer (``plot_reports``) so Claude Code SEES the rendered map.
@@ -40,7 +42,11 @@ from typing import Annotated, Any
 
 from mcp.server.fastmcp import Context, FastMCP, Image  # Phase 0.1 allowed imports
 from mcp.server.session import ServerSession  # Phase 0.1 allowed imports
-from mcp.types import ToolAnnotations  # Phase 0.2 annotations; mcp/server/fastmcp/server.py:68
+from mcp.types import (  # Phase 0.2 content blocks + annotations
+    CallToolResult,
+    TextContent,
+    ToolAnnotations,
+)
 from plot_domain import AnalysisInput, AnalysisResult
 from plot_shared import configure_logging, get_logger, get_settings
 from pydantic import Field
@@ -350,6 +356,51 @@ def map_preview(
     return Image(data=result.data, format="png" if result.mime_type == "image/png" else "svg")
 
 
+# --- Phase 4 generative drawing channel (§4.1.C): propose_layout ----------------- #
+# Public design-feasibility tool the runtime model (Claude Code) calls with a typed
+# LayoutProposal. It validates the footprint against HARD constraints BEFORE scoring
+# (§14.2: a hard violation can never be accepted), renders the drawing, and returns the
+# PNG as an INLINE image content block (the model SEES its drawing — reuses the Phase 3
+# image path) PLUS structured {score, critique, accepted, violations}. Every call is
+# audit-logged inside the drawing loop (F-0446). Returning a CallToolResult directly with
+# structured_output=False lets us attach BOTH the image block and structuredContent
+# (verified: mcp/server/lowlevel/server.py:540 passes a CallToolResult straight through;
+# mcp/server/fastmcp/utilities/func_metadata.py:98 convert_result short-circuits on it).
+@mcp.tool(
+    annotations=_READ_ONLY,
+    description="Propose a building footprint/site layout; validate hard constraints, render, score and critique it.",
+    structured_output=False,
+)
+def propose_layout(
+    proposal: Annotated[
+        dict[str, Any],
+        Field(description="Typed LayoutProposal (program_type + GeoJSON footprint OR draw-DSL rectangles, floors, parking, greenery). Treated as DATA validated by rules, never trusted free-form (NFR-SEC-003)."),
+    ],
+    *,
+    ctx: Context[ServerSession, AppContext],
+) -> CallToolResult:
+    out = _app(ctx).usecases.propose_layout_render(proposal)
+    # Inline the rendered PNG as an image content block (Phase 0.2 image path).
+    image = Image(data=out["png_bytes"], format="png").to_image_content()
+    structured = {
+        "accepted": out["accepted"],
+        "valid": out["valid"],
+        "score": out["score"],
+        "critique": out["critique"],
+        "violations": out["violations"],
+        "artifact_uri": out["artifact_uri"],
+        "audit": out["audit"],
+        "note": out["note"],
+    }
+    return CallToolResult(
+        content=[
+            image,
+            TextContent(type="text", text=json.dumps(structured, indent=2)),
+        ],
+        structuredContent=structured,
+    )
+
+
 @mcp.tool(annotations=_READ_ONLY, description="Run diagnostics for debugging and QA.")
 def diagnostics_run(
     ctx: Context[ServerSession, AppContext],
@@ -389,6 +440,18 @@ if _settings.dev_hot_reload:
             "rule_count": len(registry.rules),
             "last_reload_at": app.last_reload_at.isoformat() if app.last_reload_at else None,
         }
+
+    # selfimprove_run — dev-only Phase 4 §4.1.C tool. Runs the golden scenarios through
+    # the DevLoop and returns the before/after Verdict + screenshot artifact uris. Gated
+    # by dev_hot_reload like dev_reload so production never exposes it (§16, §4.4).
+    @mcp.tool(
+        annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True),
+        description="[dev] Run golden scenarios through the self-improve dev-loop and return the before/after verdict.",
+    )
+    def selfimprove_run(
+        ctx: Context[ServerSession, AppContext],
+    ) -> dict[str, Any]:
+        return _app(ctx).usecases.selfimprove_run()
 
 
 # --------------------------------------------------------------------------- #
