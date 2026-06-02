@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  TEST FIXTURE — NOT REAL SERVICE DATA. Hand-crafted minimal WFS 2.0.0
+  GetCapabilities document for plot_connectors contract tests (Phase 6 §6.4).
+  It declares one feature type with EPSG:2180 so layer discovery can be asserted
+  offline; no live network call is made.
+-->
+<wfs:WFS_Capabilities xmlns:wfs="http://www.opengis.net/wfs/2.0"
+                      xmlns:ows="http://www.opengis.net/ows/1.1"
+                      xmlns:xlink="http://www.w3.org/1999/xlink"
+                      version="2.0.0">
+  <ows:ServiceIdentification>
+    <ows:Title>TEST FIXTURE WFS (plot_connectors)</ows:Title>
+    <ows:ServiceType>WFS</ows:ServiceType>
+    <ows:ServiceTypeVersion>2.0.0</ows:ServiceTypeVersion>
+  </ows:ServiceIdentification>
+  <ows:OperationsMetadata>
+    <ows:Operation name="GetCapabilities">
+      <ows:DCP><ows:HTTP><ows:Get xlink:href="https://sdi.gdos.gov.pl/wfs?"/></ows:HTTP></ows:DCP>
+    </ows:Operation>
+    <ows:Operation name="GetFeature">
+      <ows:DCP><ows:HTTP><ows:Get xlink:href="https://sdi.gdos.gov.pl/wfs?"/></ows:HTTP></ows:DCP>
+    </ows:Operation>
+  </ows:OperationsMetadata>
+  <wfs:FeatureTypeList>
+    <wfs:FeatureType>
+      <wfs:Name>gdos:ProtectedSite</wfs:Name>
+      <wfs:Title>Protected sites (TEST FIXTURE)</wfs:Title>
+      <wfs:DefaultCRS>urn:ogc:def:crs:EPSG::2180</wfs:DefaultCRS>
+      <ows:WGS84BoundingBox>
+        <ows:LowerCorner>14.12 49.00</ows:LowerCorner>
+        <ows:UpperCorner>24.15 54.84</ows:UpperCorner>
+      </ows:WGS84BoundingBox>
+    </wfs:FeatureType>
+  </wfs:FeatureTypeList>
+</wfs:WFS_Capabilities>

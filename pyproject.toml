@@ -55,6 +55,11 @@ dev = [
     "types-PyYAML>=6.0",
     # Property-based tests for the geometry core (Phase 5 §5.3, F-0547).
     "hypothesis>=6.100",
+    # Fixture-based httpx mocking for connector contract tests (Phase 6 §6.4):
+    # respx patches the httpx transport so the default test run makes ZERO live
+    # network calls (every request is routed to a recorded fixture; respx asserts
+    # all requests were mocked). Verified against the installed respx source.
+    "respx>=0.21",
 ]
 
 [tool.ruff]
@@ -114,11 +119,19 @@ module = [
     "matplotlib.*",
     "boto3.*",
     "playwright.*",
+    # Phase 6 connector stack — owslib has no py.typed; redis is an optional lazy import.
+    "owslib.*",
+    "redis.*",
 ]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 minversion = "8.0"
-addopts = "-q"
+# `-m "not live"` excludes opt-in live-network smoke tests from the default run
+# (Phase 6 §6.4: the default suite makes ZERO live network calls).
+addopts = "-q -m \"not live\""
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "live: opt-in smoke tests that hit real external services; skipped by default (Phase 6 §6.4).",
+]

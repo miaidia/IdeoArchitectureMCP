@@ -1,0 +1,19 @@
+{
+  "_comment": "TEST FIXTURE — NOT REAL SERVICE DATA. Hand-crafted minimal WFS 2.0.0 GetFeature GeoJSON for plot_connectors contract tests (Phase 6 §6.4). Geometry is a small synthetic polygon in EPSG:2180.",
+  "type": "FeatureCollection",
+  "crs": {"type": "name", "properties": {"name": "urn:ogc:def:crs:EPSG::2180"}},
+  "features": [
+    {
+      "type": "Feature",
+      "id": "ProtectedSite.fixture.1",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[630850, 497150], [630950, 497150], [630950, 497250], [630850, 497250], [630850, 497150]]]
+      },
+      "properties": {
+        "site_name": "TEST FIXTURE protected site",
+        "designation": "fixture_designation"
+      }
+    }
+  ]
+}

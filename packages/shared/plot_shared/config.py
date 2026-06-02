@@ -58,6 +58,26 @@ class Settings(BaseSettings):
         description="Bucket for snapshots, rasters, and report artifacts (no raster blobs in DB).",
     )
 
+    # --- Connector egress allowlist (F-0488/0489, §16 "Allowlista domen publicznych") ---
+    # Host suffixes the connectors are allowed to reach. Seeded from the §6 start
+    # sources (Polish government / official-register domains). A fetch to any other
+    # host is refused (EgressBlocked). Override via PLOT_EGRESS_ALLOWLIST (comma- or
+    # JSON-list) to extend for new connectors; never widen to a wildcard.
+    egress_allowlist: tuple[str, ...] = Field(
+        default=(
+            "uldk.gugik.gov.pl",  # ULDK parcel resolver (Phase 0.3, F-0041)
+            "geoportal.gov.pl",  # Geoportal WMS/WMTS/WFS/WCS, ortofoto, NMT/NMPT, BDOT10k, GESUT (§6.1)
+            "gugik.gov.pl",  # GUGiK services (PRG, EGiB) (§6.1)
+            "gov.pl",  # planning-data viewer / Rejestr Urbanistyczny / zagospodarowanieprzestrzenne (§6.2)
+            "isok.gov.pl",  # Hydroportal / ISOK MZP/MRP/WORP flood (§6.3, F-0064)
+            "gdos.gov.pl",  # Geoserwis GDOŚ / CRFOP protected areas (§6.3, F-0066)
+            "pgi.gov.pl",  # PIG-PIB SOPO landslides / CBDG / MIDAS (§6.3, F-0068)
+            "zabytek.gov.pl",  # NID heritage map portal (§6.3, F-0071)
+            "stat.gov.pl",  # GUS / TERYT (§6.1, F-0044)
+        ),
+        description="Allowed connector egress host suffixes (F-0488/0489, §16). Never a wildcard.",
+    )
+
     # --- Development / analysis defaults ---
     dev_hot_reload: bool = Field(
         default=False,

@@ -1,9 +1,27 @@
-# plot-connectors — workspace member. Stub package (no runtime code yet); deferred to a later phase.
+# plot-connectors — external data connectors framework + core connectors (Phase 6).
+#
+# Adapter contract (fetch/normalize/snapshot/healthcheck — §20.3) with a shared
+# httpx async client, tenacity retry+backoff, pybreaker circuit breaker, an egress
+# allowlist + SSRF guard (F-0488/0489), owslib GetCapabilities introspection
+# (capabilities are injectable so tests never hit the network), a pluggable cache
+# (in-memory default), and SourceRecord/EvidenceItem emission (§5, §11).
+#
+# Decoupling rule (Phase 1.4 / §9.4): plot_connectors must NOT import plot_rules.
+# It may depend on plot_domain / plot_shared / plot_geo / plot_reports.
 [project]
 name = "plot-connectors"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "httpx>=0.27",
+    "tenacity>=8.3",
+    "owslib>=0.31",
+    "pybreaker>=1.2",
+    "plot-domain",
+    "plot-shared",
+    "plot-geo",
+    "plot-reports",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -11,3 +29,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["plot_connectors"]
+
+[tool.uv.sources]
+plot-domain = { workspace = true }
+plot-shared = { workspace = true }
+plot-geo = { workspace = true }
+plot-reports = { workspace = true }
