@@ -1,0 +1,1129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://plot-analyzer/schemas/analysis-result.schema.json",
+  "title": "AnalysisResult",
+  "$defs": {
+    "AdministrativeContext": {
+      "description": "Administrative context for a parcel (§11.1).",
+      "properties": {
+        "teryt": {
+          "description": "TERYT code of the administrative unit.",
+          "title": "Teryt",
+          "type": "string"
+        },
+        "commune": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commune (gmina) name.",
+          "title": "Commune"
+        },
+        "county": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "County (powiat) name.",
+          "title": "County"
+        },
+        "voivodeship": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Voivodeship (województwo) name.",
+          "title": "Voivodeship"
+        },
+        "district": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Cadastral district / obręb.",
+          "title": "District"
+        },
+        "municipality_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Municipality id used to key planning acts.",
+          "title": "Municipality Id"
+        }
+      },
+      "required": [
+        "teryt"
+      ],
+      "title": "AdministrativeContext",
+      "type": "object"
+    },
+    "AnalysisScores": {
+      "description": "Score block (base_assumptions §10.7 ``scores``; §14).",
+      "properties": {
+        "buildability": {
+          "default": 0.0,
+          "description": "Buildability score.",
+          "title": "Buildability",
+          "type": "number"
+        },
+        "planning_certainty": {
+          "default": 0.0,
+          "description": "Planning certainty score.",
+          "title": "Planning Certainty",
+          "type": "number"
+        },
+        "infrastructure": {
+          "default": 0.0,
+          "description": "Infrastructure score.",
+          "title": "Infrastructure",
+          "type": "number"
+        },
+        "terrain": {
+          "default": 0.0,
+          "description": "Terrain score.",
+          "title": "Terrain",
+          "type": "number"
+        },
+        "environmental_risk": {
+          "default": 0.0,
+          "description": "Environmental risk score.",
+          "title": "Environmental Risk",
+          "type": "number"
+        },
+        "procedural_risk": {
+          "default": 0.0,
+          "description": "Procedural risk score.",
+          "title": "Procedural Risk",
+          "type": "number"
+        },
+        "data_confidence": {
+          "default": 0.0,
+          "description": "Data confidence score.",
+          "title": "Data Confidence",
+          "type": "number"
+        }
+      },
+      "title": "AnalysisScores",
+      "type": "object"
+    },
+    "AnalysisStatus": {
+      "description": "Analysis run status (base_assumptions §10.7 ``status``).",
+      "enum": [
+        "complete",
+        "partial",
+        "failed",
+        "manual_review_required"
+      ],
+      "title": "AnalysisStatus",
+      "type": "string"
+    },
+    "BuildableEnvelope": {
+      "description": "Resulting buildable area (§11.1, §26.1 buildable_envelopes; §7.5).",
+      "properties": {
+        "id": {
+          "description": "Buildable envelope id.",
+          "title": "Id",
+          "type": "string"
+        },
+        "analysis_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Owning analysis run id.",
+          "title": "Analysis Id"
+        },
+        "geometry": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Buildable polygon in EPSG:2180 (GeoJSON).",
+          "title": "Geometry"
+        },
+        "largest_inscribed_rectangle": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Largest inscribed rectangle (GeoJSON), if computed (Phase 5).",
+          "title": "Largest Inscribed Rectangle"
+        },
+        "area_m2": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Buildable area in m^2.",
+          "title": "Area M2"
+        },
+        "confidence": {
+          "default": 0.0,
+          "description": "Envelope confidence.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "description": "Spatial-op trace and style metadata (metadata_json).",
+          "title": "Metadata",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "BuildableEnvelope",
+      "type": "object"
+    },
+    "CapacityScenario": {
+      "description": "A capacity (chłonność) scenario (§11.1, §26.1 capacity_scenarios; §8.5).",
+      "properties": {
+        "id": {
+          "description": "Capacity scenario id.",
+          "title": "Id",
+          "type": "string"
+        },
+        "analysis_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Owning analysis run id.",
+          "title": "Analysis Id"
+        },
+        "scenario_type": {
+          "description": "Scenario type (conservative | base | optimistic | max).",
+          "title": "Scenario Type",
+          "type": "string"
+        },
+        "metrics": {
+          "additionalProperties": true,
+          "description": "Capacity metrics (metrics_json): GFA, PUM, parking, etc.",
+          "title": "Metrics",
+          "type": "object"
+        },
+        "risks": {
+          "description": "Scenario-specific risks (risks_json).",
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Risks",
+          "type": "array"
+        },
+        "geometry": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Scenario footprint geometry in EPSG:2180 (GeoJSON).",
+          "title": "Geometry"
+        }
+      },
+      "required": [
+        "id",
+        "scenario_type"
+      ],
+      "title": "CapacityScenario",
+      "type": "object"
+    },
+    "ConfidenceLevel": {
+      "description": "Qualitative confidence (base_assumptions §11.2 ``confidence``).",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "ConfidenceLevel",
+      "type": "string"
+    },
+    "Constraint": {
+      "description": "A geometric or descriptive constraint — mirrors base_assumptions §11.3 exactly.",
+      "properties": {
+        "constraint_id": {
+          "description": "Constraint identifier.",
+          "title": "Constraint Id",
+          "type": "string"
+        },
+        "constraint_type": {
+          "description": "Constraint type (free string).",
+          "title": "Constraint Type",
+          "type": "string"
+        },
+        "source_id": {
+          "description": "Source record id.",
+          "title": "Source Id",
+          "type": "string"
+        },
+        "source_legal_status": {
+          "$ref": "#/$defs/LegalStatus",
+          "description": "binding | informative | auxiliary | unknown."
+        },
+        "geometry": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Constraint geometry (GeoJSON) in EPSG:2180, or null.",
+          "title": "Geometry"
+        },
+        "applies_to_area_m2": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Area the constraint applies to, in m^2.",
+          "title": "Applies To Area M2"
+        },
+        "applies_to_percent": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Percent of the parcel/area the constraint applies to.",
+          "title": "Applies To Percent"
+        },
+        "rule_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Rule id that produced this constraint.",
+          "title": "Rule Id"
+        },
+        "rule_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Version of the applied rule.",
+          "title": "Rule Version"
+        },
+        "severity": {
+          "$ref": "#/$defs/Severity",
+          "description": "info | low | medium | high | critical."
+        },
+        "confidence": {
+          "description": "Confidence, 0.0-1.0.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "human_summary": {
+          "description": "Human-readable summary of the constraint.",
+          "title": "Human Summary",
+          "type": "string"
+        },
+        "machine_summary": {
+          "additionalProperties": true,
+          "description": "Machine-readable structured summary.",
+          "title": "Machine Summary",
+          "type": "object"
+        },
+        "mitigation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Possible mitigation, if any.",
+          "title": "Mitigation"
+        }
+      },
+      "required": [
+        "constraint_id",
+        "constraint_type",
+        "source_id",
+        "source_legal_status",
+        "severity",
+        "confidence",
+        "human_summary"
+      ],
+      "title": "Constraint",
+      "type": "object"
+    },
+    "Decision": {
+      "description": "Top-level decision (base_assumptions §10.7 ``decision``, §4.1).",
+      "enum": [
+        "OK",
+        "OK_WITH_RISKS",
+        "NEEDS_MANUAL_REVIEW",
+        "LIKELY_BLOCKED"
+      ],
+      "title": "Decision",
+      "type": "string"
+    },
+    "EvidenceItem": {
+      "description": "A single piece of evidence backing a claim (§11.1, §26.1 evidence_items).",
+      "properties": {
+        "id": {
+          "description": "Evidence item identifier.",
+          "title": "Id",
+          "type": "string"
+        },
+        "analysis_id": {
+          "description": "Owning analysis run id.",
+          "title": "Analysis Id",
+          "type": "string"
+        },
+        "source_id": {
+          "description": "Source record this evidence derives from.",
+          "title": "Source Id",
+          "type": "string"
+        },
+        "subject_type": {
+          "description": "Entity type the evidence is about (e.g. 'parcel').",
+          "title": "Subject Type",
+          "type": "string"
+        },
+        "subject_id": {
+          "description": "Identifier of the subject entity.",
+          "title": "Subject Id",
+          "type": "string"
+        },
+        "claim": {
+          "description": "The claim this evidence supports.",
+          "title": "Claim",
+          "type": "string"
+        },
+        "value_json": {
+          "additionalProperties": true,
+          "description": "Structured value backing the claim.",
+          "title": "Value Json",
+          "type": "object"
+        },
+        "confidence": {
+          "description": "Confidence in this evidence, 0.0-1.0.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "geometry": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional GeoJSON geometry (EPSG:2180) for the evidence.",
+          "title": "Geometry"
+        },
+        "created_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Creation timestamp.",
+          "title": "Created At"
+        }
+      },
+      "required": [
+        "id",
+        "analysis_id",
+        "source_id",
+        "subject_type",
+        "subject_id",
+        "claim",
+        "confidence"
+      ],
+      "title": "EvidenceItem",
+      "type": "object"
+    },
+    "LegalStatus": {
+      "description": "Legal status of a source / constraint (base_assumptions §5, §11.3).",
+      "enum": [
+        "binding",
+        "informative",
+        "auxiliary",
+        "unknown"
+      ],
+      "title": "LegalStatus",
+      "type": "string"
+    },
+    "Parcel": {
+      "description": "A cadastral parcel (§11.1, §26.1 parcels).",
+      "properties": {
+        "id": {
+          "description": "Internal parcel id.",
+          "title": "Id",
+          "type": "string"
+        },
+        "external_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "External cadastral id.",
+          "title": "External Id"
+        },
+        "teryt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "TERYT code.",
+          "title": "Teryt"
+        },
+        "obr": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Cadastral district (obręb).",
+          "title": "Obr"
+        },
+        "number": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Parcel number.",
+          "title": "Number"
+        },
+        "geometry": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Parcel geometry in analytical CRS EPSG:2180 (GeoJSON).",
+          "title": "Geometry"
+        },
+        "geometry_wkt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional WKT representation of the geometry.",
+          "title": "Geometry Wkt"
+        },
+        "input_crs": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Original input CRS, kept as metadata (§26.3).",
+          "title": "Input Crs"
+        },
+        "area_m2": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Parcel area in m^2.",
+          "title": "Area M2"
+        },
+        "source_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Source record id for this parcel.",
+          "title": "Source Id"
+        },
+        "snapshot_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Source snapshot id.",
+          "title": "Snapshot Id"
+        },
+        "administrative_context": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AdministrativeContext"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Administrative context for the parcel."
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "Parcel",
+      "type": "object"
+    },
+    "Recommendation": {
+      "description": "A recommendation / next action (§11.1).",
+      "properties": {
+        "id": {
+          "description": "Recommendation id.",
+          "title": "Id",
+          "type": "string"
+        },
+        "analysis_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Owning analysis run id.",
+          "title": "Analysis Id"
+        },
+        "title": {
+          "description": "Short recommendation title.",
+          "title": "Title",
+          "type": "string"
+        },
+        "detail": {
+          "description": "Recommendation detail / rationale.",
+          "title": "Detail",
+          "type": "string"
+        },
+        "priority": {
+          "$ref": "#/$defs/Severity",
+          "default": "medium",
+          "description": "Priority expressed on the severity scale."
+        },
+        "addressed_to": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Specialist/authority the action is addressed to (NFR-DOM-008).",
+          "title": "Addressed To"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "detail"
+      ],
+      "title": "Recommendation",
+      "type": "object"
+    },
+    "ReportArtifact": {
+      "description": "A report / map / export artifact (§11.1, §26.1 report_artifacts).",
+      "properties": {
+        "id": {
+          "description": "Artifact id.",
+          "title": "Id",
+          "type": "string"
+        },
+        "analysis_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Owning analysis run id.",
+          "title": "Analysis Id"
+        },
+        "artifact_type": {
+          "description": "Artifact type (md | html | pdf | json | gpkg | dxf | png).",
+          "title": "Artifact Type",
+          "type": "string"
+        },
+        "uri": {
+          "description": "Object-storage URI of the artifact.",
+          "title": "Uri",
+          "type": "string"
+        },
+        "content_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Content hash for reproducibility.",
+          "title": "Content Hash"
+        },
+        "created_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Creation timestamp.",
+          "title": "Created At"
+        }
+      },
+      "required": [
+        "id",
+        "artifact_type",
+        "uri"
+      ],
+      "title": "ReportArtifact",
+      "type": "object"
+    },
+    "RiskItem": {
+      "description": "A risk item (§11.1, §11.2, §26.1 risk_items).",
+      "properties": {
+        "id": {
+          "description": "Risk item id.",
+          "title": "Id",
+          "type": "string"
+        },
+        "analysis_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Owning analysis run id.",
+          "title": "Analysis Id"
+        },
+        "risk_type": {
+          "$ref": "#/$defs/RiskType",
+          "description": "Risk category (§11.2)."
+        },
+        "severity": {
+          "$ref": "#/$defs/Severity",
+          "description": "info | low | medium | high | critical."
+        },
+        "confidence": {
+          "$ref": "#/$defs/ConfidenceLevel",
+          "description": "low | medium | high (§11.2)."
+        },
+        "status": {
+          "$ref": "#/$defs/RiskStatus",
+          "description": "detected | suspected | not_detected | unknown | manual_review_required."
+        },
+        "summary": {
+          "description": "Human-readable risk summary.",
+          "title": "Summary",
+          "type": "string"
+        },
+        "mitigation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Mitigation, if any.",
+          "title": "Mitigation"
+        },
+        "source_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Source record id.",
+          "title": "Source Id"
+        }
+      },
+      "required": [
+        "id",
+        "risk_type",
+        "severity",
+        "confidence",
+        "status",
+        "summary"
+      ],
+      "title": "RiskItem",
+      "type": "object"
+    },
+    "RiskStatus": {
+      "description": "Risk status (base_assumptions §11.2 ``status``).\n\nKeeps the spec distinction between detected / suspected / not_detected /\nunknown / manual_review_required (§2.1, §21).",
+      "enum": [
+        "detected",
+        "suspected",
+        "not_detected",
+        "unknown",
+        "manual_review_required"
+      ],
+      "title": "RiskStatus",
+      "type": "string"
+    },
+    "RiskType": {
+      "description": "Risk categories (base_assumptions §11.2 ``risk_type``).",
+      "enum": [
+        "planning",
+        "legal",
+        "ownership",
+        "road_access",
+        "utilities",
+        "environmental",
+        "flood",
+        "geology",
+        "heritage",
+        "terrain",
+        "technical_building_rules",
+        "procedural",
+        "cost",
+        "data_quality",
+        "market"
+      ],
+      "title": "RiskType",
+      "type": "string"
+    },
+    "Severity": {
+      "description": "Severity scale (base_assumptions §11.2 ``severity``).",
+      "enum": [
+        "info",
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
+      "title": "Severity",
+      "type": "string"
+    },
+    "UnknownItem": {
+      "description": "An unresolved / undetermined item (§11.1, §26.1 unknown_items).",
+      "properties": {
+        "id": {
+          "description": "Unknown item id.",
+          "title": "Id",
+          "type": "string"
+        },
+        "analysis_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Owning analysis run id.",
+          "title": "Analysis Id"
+        },
+        "topic": {
+          "description": "Topic that could not be determined.",
+          "title": "Topic",
+          "type": "string"
+        },
+        "severity": {
+          "$ref": "#/$defs/Severity",
+          "description": "Severity of not knowing this."
+        },
+        "reason": {
+          "description": "Why it is unknown (e.g. source_unavailable, no_data).",
+          "title": "Reason",
+          "type": "string"
+        },
+        "suggested_action": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Suggested action to resolve the unknown.",
+          "title": "Suggested Action"
+        }
+      },
+      "required": [
+        "id",
+        "topic",
+        "severity",
+        "reason"
+      ],
+      "title": "UnknownItem",
+      "type": "object"
+    }
+  },
+  "description": "Full structured analysis result (base_assumptions §10.7).\n\nThis is the canonical contract returned by ``parcel_analyze`` /\n``analysis_get_result`` and the basis of ``analysis-result.schema.json``.",
+  "properties": {
+    "analysis_id": {
+      "description": "Analysis run id (uuid).",
+      "title": "Analysis Id",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/AnalysisStatus",
+      "description": "complete | partial | failed | manual_review_required."
+    },
+    "decision": {
+      "$ref": "#/$defs/Decision",
+      "description": "OK | OK_WITH_RISKS | NEEDS_MANUAL_REVIEW | LIKELY_BLOCKED."
+    },
+    "scores": {
+      "$ref": "#/$defs/AnalysisScores",
+      "description": "Analysis scores (§14)."
+    },
+    "parcel": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Parcel"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Resolved parcel."
+    },
+    "planning": {
+      "additionalProperties": true,
+      "description": "Planning context summary block.",
+      "title": "Planning",
+      "type": "object"
+    },
+    "constraints": {
+      "description": "Computed constraints (§11.3).",
+      "items": {
+        "$ref": "#/$defs/Constraint"
+      },
+      "title": "Constraints",
+      "type": "array"
+    },
+    "buildable_envelope": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BuildableEnvelope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Buildable envelope result."
+    },
+    "capacity_scenarios": {
+      "description": "Capacity scenarios (§8.5).",
+      "items": {
+        "$ref": "#/$defs/CapacityScenario"
+      },
+      "title": "Capacity Scenarios",
+      "type": "array"
+    },
+    "risks": {
+      "description": "Risk register (§11.2).",
+      "items": {
+        "$ref": "#/$defs/RiskItem"
+      },
+      "title": "Risks",
+      "type": "array"
+    },
+    "unknowns": {
+      "description": "Unknown items (must persist, §20.10).",
+      "items": {
+        "$ref": "#/$defs/UnknownItem"
+      },
+      "title": "Unknowns",
+      "type": "array"
+    },
+    "next_actions": {
+      "description": "Recommended next actions (NFR-DOM-006/008).",
+      "items": {
+        "$ref": "#/$defs/Recommendation"
+      },
+      "title": "Next Actions",
+      "type": "array"
+    },
+    "evidence": {
+      "description": "Evidence backing the result (NFR-AUD-001).",
+      "items": {
+        "$ref": "#/$defs/EvidenceItem"
+      },
+      "title": "Evidence",
+      "type": "array"
+    },
+    "artifacts": {
+      "description": "Report/map/export artifacts.",
+      "items": {
+        "$ref": "#/$defs/ReportArtifact"
+      },
+      "title": "Artifacts",
+      "type": "array"
+    }
+  },
+  "required": [
+    "analysis_id",
+    "status",
+    "decision"
+  ],
+  "type": "object"
+}

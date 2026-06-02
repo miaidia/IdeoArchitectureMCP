@@ -1,0 +1,241 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://plot-analyzer/schemas/analysis-input.schema.json",
+  "title": "AnalysisInput",
+  "$defs": {
+    "AnalysisInputData": {
+      "description": "The ``input`` block of ``parcel_analyze`` (base_assumptions §10.6).",
+      "properties": {
+        "parcel_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Parcel identifier.",
+          "title": "Parcel Id"
+        },
+        "address": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Free-text address.",
+          "title": "Address"
+        },
+        "point": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PointInput"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Point with CRS."
+        },
+        "geometry": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "GeoJSON or WKT geometry as a string, or null.",
+          "title": "Geometry"
+        },
+        "uploaded_files": {
+          "description": "Uploaded file ids attached to the analysis.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Uploaded Files",
+          "type": "array"
+        }
+      },
+      "title": "AnalysisInputData",
+      "type": "object"
+    },
+    "AnalysisMode": {
+      "description": "Analysis mode (base_assumptions §10.6 ``analysis_mode``).",
+      "enum": [
+        "quick_screening",
+        "full_due_diligence",
+        "design_feasibility",
+        "portfolio_batch"
+      ],
+      "title": "AnalysisMode",
+      "type": "string"
+    },
+    "AnalysisOptions": {
+      "description": "Analysis options (base_assumptions §10.6 ``options``).",
+      "properties": {
+        "country": {
+          "default": "PL",
+          "description": "Country code.",
+          "title": "Country",
+          "type": "string"
+        },
+        "ruleset_version": {
+          "default": "latest",
+          "description": "Ruleset version or 'latest'.",
+          "title": "Ruleset Version",
+          "type": "string"
+        },
+        "strict_sources_only": {
+          "default": false,
+          "description": "Use only strict (binding) sources.",
+          "title": "Strict Sources Only",
+          "type": "boolean"
+        },
+        "include_auxiliary_sources": {
+          "default": true,
+          "description": "Include auxiliary sources.",
+          "title": "Include Auxiliary Sources",
+          "type": "boolean"
+        },
+        "return_maps": {
+          "default": true,
+          "description": "Whether to return map artifacts.",
+          "title": "Return Maps",
+          "type": "boolean"
+        },
+        "return_evidence": {
+          "default": true,
+          "description": "Whether to return evidence.",
+          "title": "Return Evidence",
+          "type": "boolean"
+        },
+        "max_runtime_profile": {
+          "default": "standard",
+          "description": "fast | standard | exhaustive.",
+          "title": "Max Runtime Profile",
+          "type": "string"
+        }
+      },
+      "title": "AnalysisOptions",
+      "type": "object"
+    },
+    "InvestmentGoal": {
+      "description": "Investment goal (base_assumptions §10.6 ``investment_goal``).",
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/InvestmentType",
+          "default": "unknown",
+          "description": "Investment type."
+        },
+        "target_gfa_m2": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Target gross floor area, m^2.",
+          "title": "Target Gfa M2"
+        },
+        "target_units": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Target number of units.",
+          "title": "Target Units"
+        },
+        "risk_preference": {
+          "default": "balanced",
+          "description": "conservative | balanced | optimistic.",
+          "title": "Risk Preference",
+          "type": "string"
+        }
+      },
+      "title": "InvestmentGoal",
+      "type": "object"
+    },
+    "InvestmentType": {
+      "description": "Investment goal type (base_assumptions §10.6 ``investment_goal.type``).",
+      "enum": [
+        "single_family",
+        "multifamily",
+        "services",
+        "warehouse",
+        "mixed",
+        "unknown"
+      ],
+      "title": "InvestmentType",
+      "type": "string"
+    },
+    "PointInput": {
+      "description": "A point input (base_assumptions §10.6 ``input.point``).",
+      "properties": {
+        "x": {
+          "description": "X coordinate.",
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "description": "Y coordinate.",
+          "title": "Y",
+          "type": "number"
+        },
+        "crs": {
+          "default": "EPSG:4326",
+          "description": "CRS of the point.",
+          "title": "Crs",
+          "type": "string"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ],
+      "title": "PointInput",
+      "type": "object"
+    }
+  },
+  "description": "Full ``parcel_analyze`` input (base_assumptions §10.6).",
+  "properties": {
+    "input": {
+      "$ref": "#/$defs/AnalysisInputData",
+      "description": "Input locating the parcel/area."
+    },
+    "analysis_mode": {
+      "$ref": "#/$defs/AnalysisMode",
+      "description": "quick/full/design/portfolio."
+    },
+    "investment_goal": {
+      "$ref": "#/$defs/InvestmentGoal",
+      "description": "Investment goal."
+    },
+    "options": {
+      "$ref": "#/$defs/AnalysisOptions",
+      "description": "Analysis options."
+    }
+  },
+  "required": [
+    "input",
+    "analysis_mode"
+  ],
+  "type": "object"
+}

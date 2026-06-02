@@ -1,0 +1,9 @@
+# OpenAPI contract for the HTTP API (apps/api). Placeholder for Phase 1.
+# The full API shares the same domain use-cases as MCP (base_assumptions §27)
+# and is implemented in Phase 12. Listed here to match the §9.1 layout.
+openapi: 3.1.0
+info:
+  title: Plot Analyzer API
+  version: 0.1.0
+  description: HTTP API for the Plot Analyzer. Endpoints are defined in Phase 12 (§27).
+paths: {}

@@ -1,0 +1,26 @@
+# plot-domain — Pydantic v2 domain models + (optional) SQLAlchemy/GeoAlchemy2 ORM.
+#
+# The domain *models* (plot_domain.models, .enums, .result) depend only on
+# pydantic (base_assumptions §9.4 / Phase 1.4 decoupling). The persistence
+# submodule `plot_domain.db` is the single place that pulls in the DB stack; it
+# is intentionally NOT imported by plot_domain/__init__ so importing the models
+# never drags in SQLAlchemy. Connectors and rules must never import plot_domain.db.
+[project]
+name = "plot-domain"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2",
+    # Persistence stack (used only by plot_domain.db / migrations).
+    "sqlalchemy>=2",
+    "geoalchemy2>=0.15",
+    "alembic>=1.13",
+    "psycopg[binary]>=3.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["plot_domain"]

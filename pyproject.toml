@@ -1,0 +1,114 @@
+# Root workspace manifest for the Plot Analyzer MCP monorepo (base_assumptions §9.1 layout).
+# uv workspace: members live under apps/* and packages/*; each is its own installable package.
+[project]
+name = "plot-analyzer"
+version = "0.1.0"
+description = "Plot Analyzer MCP server for Claude Code — monorepo root (Phase 1 foundation)."
+requires-python = ">=3.12"
+readme = "README.md"
+# Root aggregates the workspace members so `uv sync` installs the whole monorepo.
+dependencies = [
+    "plot-shared",
+    "plot-domain",
+    "plot-geo",
+    "plot-connectors",
+    "plot-planning",
+    "plot-rules",
+    "plot-envelope",
+    "plot-reports",
+    "plot-evidence",
+    "plot-agent",
+    "plot-security",
+    "plot-api",
+    "plot-mcp-server",
+    "plot-worker",
+]
+
+[tool.uv.workspace]
+members = ["apps/*", "packages/*"]
+# apps/web is an optional (non-Python) frontend panel/map, added in a later phase.
+exclude = ["apps/web"]
+
+[tool.uv.sources]
+plot-shared = { workspace = true }
+plot-domain = { workspace = true }
+plot-geo = { workspace = true }
+plot-connectors = { workspace = true }
+plot-planning = { workspace = true }
+plot-rules = { workspace = true }
+plot-envelope = { workspace = true }
+plot-reports = { workspace = true }
+plot-evidence = { workspace = true }
+plot-agent = { workspace = true }
+plot-security = { workspace = true }
+plot-api = { workspace = true }
+plot-mcp-server = { workspace = true }
+plot-worker = { workspace = true }
+
+# Dev tooling shared across the whole workspace (root-level, per Phase 1 deliverable #8).
+[dependency-groups]
+dev = [
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "pytest>=8",
+    "jsonschema>=4.21",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["packages", "apps", "schemas", "tests"]
+
+[tool.ruff.lint]
+# Conservative-but-useful default rule set for a greenfield project.
+select = ["E", "F", "I", "UP", "B", "W"]
+ignore = [
+    "E501",   # line length handled by formatter / line-length above
+    "UP042",  # `(str, Enum)` is intentional: stable JSON value serialization across the codebase
+    "UP046",  # `Generic[T]` (vs PEP 695 syntax) is required for Pydantic v2 generic models
+]
+
+[tool.mypy]
+python_version = "3.12"
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+namespace_packages = true
+explicit_package_bases = true
+# Each workspace member uses a flat (src-less) layout, so its package root is the
+# member directory itself. Listing them as mypy bases lets `mypy packages` map
+# e.g. packages/domain/plot_domain/enums.py -> module `plot_domain.enums`
+# (avoids "source file found twice under different module names").
+mypy_path = [
+    "packages/shared",
+    "packages/domain",
+    "packages/geo",
+    "packages/connectors",
+    "packages/planning",
+    "packages/rules",
+    "packages/envelope",
+    "packages/reports",
+    "packages/evidence",
+    "packages/agent",
+    "packages/security",
+    "apps/api",
+    "apps/mcp-server",
+    "apps/worker",
+]
+# Plugin gives mypy full Pydantic v2 model awareness (Phase 0.4 pydantic v2).
+plugins = ["pydantic.mypy"]
+# Heavy GIS / infra libs without bundled stubs are ignored at the import boundary.
+[[tool.mypy.overrides]]
+module = [
+    "geoalchemy2.*",
+    "structlog.*",
+    "prometheus_client.*",
+    "opentelemetry.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-q"
+testpaths = ["tests"]
+pythonpath = ["."]

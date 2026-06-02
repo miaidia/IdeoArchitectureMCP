@@ -1,0 +1,260 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://plot-analyzer/schemas/mcp-tools.schema.json",
+  "title": "MCP Tools",
+  "type": "object",
+  "description": "Public MCP tool surface (base_assumptions §10.3).",
+  "properties": {
+    "tools": {
+      "type": "object",
+      "properties": {
+        "parcel_resolve": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "const": "Resolve parcel from id, address, point, geometry or uploaded file."
+            }
+          },
+          "required": [
+            "description"
+          ]
+        },
+        "parcel_analyze": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "const": "Run quick/full/design/portfolio analysis."
+            }
+          },
+          "required": [
+            "description"
+          ]
+        },
+        "analysis_get_status": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "const": "Return status, progress and partial results."
+            }
+          },
+          "required": [
+            "description"
+          ]
+        },
+        "analysis_get_result": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "const": "Return structured result for an analysis run."
+            }
+          },
+          "required": [
+            "description"
+          ]
+        },
+        "planning_fetch": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "const": "Fetch planning context and planning acts for parcel/area."
+            }
+          },
+          "required": [
+            "description"
+          ]
+        },
+        "planning_parse_document": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "const": "Parse user-supplied planning document with evidence."
+            }
+          },
+          "required": [
+            "description"
+          ]
+        },
+        "constraints_compute": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "const": "Compute constraints and buildable envelope."
+            }
+          },
+          "required": [
+            "description"
+          ]
+        },
+        "capacity_generate_scenarios": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "const": "Generate building capacity scenarios."
+            }
+          },
+          "required": [
+            "description"
+          ]
+        },
+        "risks_list": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "const": "Return red flags, risk register and unknowns."
+            }
+          },
+          "required": [
+            "description"
+          ]
+        },
+        "sources_collect": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "const": "Collect source records and evidence pack."
+            }
+          },
+          "required": [
+            "description"
+          ]
+        },
+        "report_generate": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "const": "Generate report artifact in selected format."
+            }
+          },
+          "required": [
+            "description"
+          ]
+        },
+        "export_layers": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "const": "Export GIS/CAD layers."
+            }
+          },
+          "required": [
+            "description"
+          ]
+        },
+        "portfolio_analyze": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "const": "Analyze many parcels."
+            }
+          },
+          "required": [
+            "description"
+          ]
+        },
+        "monitoring_create": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "const": "Create monitoring profile for changes."
+            }
+          },
+          "required": [
+            "description"
+          ]
+        },
+        "ruleset_explain": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "const": "Explain which rules were applied."
+            }
+          },
+          "required": [
+            "description"
+          ]
+        },
+        "source_healthcheck": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "const": "Check external source availability."
+            }
+          },
+          "required": [
+            "description"
+          ]
+        },
+        "cache_warm": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "const": "Preload source/cache data for municipality or parcel."
+            }
+          },
+          "required": [
+            "description"
+          ]
+        },
+        "document_ingest": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "const": "Ingest user documents and attach to analysis."
+            }
+          },
+          "required": [
+            "description"
+          ]
+        },
+        "manual_override": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "const": "Apply expert override with audit trail."
+            }
+          },
+          "required": [
+            "description"
+          ]
+        },
+        "diagnostics_run": {
+          "type": "object",
+          "properties": {
+            "description": {
+              "const": "Run diagnostics for debugging and QA."
+            }
+          },
+          "required": [
+            "description"
+          ]
+        }
+      },
+      "required": [
+        "parcel_resolve",
+        "parcel_analyze",
+        "analysis_get_status",
+        "analysis_get_result",
+        "planning_fetch",
+        "planning_parse_document",
+        "constraints_compute",
+        "capacity_generate_scenarios",
+        "risks_list",
+        "sources_collect",
+        "report_generate",
+        "export_layers",
+        "portfolio_analyze",
+        "monitoring_create",
+        "ruleset_explain",
+        "source_healthcheck",
+        "cache_warm",
+        "document_ingest",
+        "manual_override",
+        "diagnostics_run"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "tools"
+  ]
+}

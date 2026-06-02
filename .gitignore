@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# uv / virtualenv
+.venv/
+uv.lock.bak
+
+# Environment / secrets (NEVER commit real .env — only .env.example is tracked)
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+*.swp
+
+# Build artifacts / object storage scratch
+dist/
+build/
+*.log

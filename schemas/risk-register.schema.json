@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://plot-analyzer/schemas/risk-register.schema.json",
+  "title": "RiskItem",
+  "$defs": {
+    "ConfidenceLevel": {
+      "description": "Qualitative confidence (base_assumptions §11.2 ``confidence``).",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "ConfidenceLevel",
+      "type": "string"
+    },
+    "RiskStatus": {
+      "description": "Risk status (base_assumptions §11.2 ``status``).\n\nKeeps the spec distinction between detected / suspected / not_detected /\nunknown / manual_review_required (§2.1, §21).",
+      "enum": [
+        "detected",
+        "suspected",
+        "not_detected",
+        "unknown",
+        "manual_review_required"
+      ],
+      "title": "RiskStatus",
+      "type": "string"
+    },
+    "RiskType": {
+      "description": "Risk categories (base_assumptions §11.2 ``risk_type``).",
+      "enum": [
+        "planning",
+        "legal",
+        "ownership",
+        "road_access",
+        "utilities",
+        "environmental",
+        "flood",
+        "geology",
+        "heritage",
+        "terrain",
+        "technical_building_rules",
+        "procedural",
+        "cost",
+        "data_quality",
+        "market"
+      ],
+      "title": "RiskType",
+      "type": "string"
+    },
+    "Severity": {
+      "description": "Severity scale (base_assumptions §11.2 ``severity``).",
+      "enum": [
+        "info",
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
+      "title": "Severity",
+      "type": "string"
+    }
+  },
+  "description": "A risk item (§11.1, §11.2, §26.1 risk_items).",
+  "properties": {
+    "id": {
+      "description": "Risk item id.",
+      "title": "Id",
+      "type": "string"
+    },
+    "analysis_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Owning analysis run id.",
+      "title": "Analysis Id"
+    },
+    "risk_type": {
+      "$ref": "#/$defs/RiskType",
+      "description": "Risk category (§11.2)."
+    },
+    "severity": {
+      "$ref": "#/$defs/Severity",
+      "description": "info | low | medium | high | critical."
+    },
+    "confidence": {
+      "$ref": "#/$defs/ConfidenceLevel",
+      "description": "low | medium | high (§11.2)."
+    },
+    "status": {
+      "$ref": "#/$defs/RiskStatus",
+      "description": "detected | suspected | not_detected | unknown | manual_review_required."
+    },
+    "summary": {
+      "description": "Human-readable risk summary.",
+      "title": "Summary",
+      "type": "string"
+    },
+    "mitigation": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Mitigation, if any.",
+      "title": "Mitigation"
+    },
+    "source_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Source record id.",
+      "title": "Source Id"
+    }
+  },
+  "required": [
+    "id",
+    "risk_type",
+    "severity",
+    "confidence",
+    "status",
+    "summary"
+  ],
+  "type": "object"
+}

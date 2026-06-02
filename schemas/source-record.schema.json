@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://plot-analyzer/schemas/source-record.schema.json",
+  "title": "SourceRecord",
+  "$defs": {
+    "Freshness": {
+      "description": "Source freshness (base_assumptions §5 ``freshness``).",
+      "enum": [
+        "current",
+        "stale",
+        "archived",
+        "unknown"
+      ],
+      "title": "Freshness",
+      "type": "string"
+    },
+    "GeometryPrecision": {
+      "description": "Geometry precision class (base_assumptions §5 ``geometry_precision``).",
+      "enum": [
+        "survey",
+        "cadastral",
+        "topographic",
+        "raster_derived",
+        "approximate",
+        "unknown"
+      ],
+      "title": "GeometryPrecision",
+      "type": "string"
+    },
+    "LegalStatus": {
+      "description": "Legal status of a source / constraint (base_assumptions §5, §11.3).",
+      "enum": [
+        "binding",
+        "informative",
+        "auxiliary",
+        "unknown"
+      ],
+      "title": "LegalStatus",
+      "type": "string"
+    },
+    "SourceType": {
+      "description": "Source type (base_assumptions §5 ``source_type``).",
+      "enum": [
+        "official_register",
+        "local_sip",
+        "user_document",
+        "commercial",
+        "auxiliary"
+      ],
+      "title": "SourceType",
+      "type": "string"
+    }
+  },
+  "description": "A data source record — mirrors base_assumptions §5 exactly.",
+  "properties": {
+    "source_id": {
+      "description": "Stable identifier of the source record.",
+      "title": "Source Id",
+      "type": "string"
+    },
+    "source_type": {
+      "$ref": "#/$defs/SourceType",
+      "description": "official_register | local_sip | user_document | commercial | auxiliary."
+    },
+    "publisher": {
+      "description": "Publishing authority or organisation.",
+      "title": "Publisher",
+      "type": "string"
+    },
+    "url_or_origin": {
+      "description": "URL or origin descriptor of the source.",
+      "title": "Url Or Origin",
+      "type": "string"
+    },
+    "retrieved_at": {
+      "description": "When the source was retrieved.",
+      "format": "date-time",
+      "title": "Retrieved At",
+      "type": "string"
+    },
+    "valid_from": {
+      "anyOf": [
+        {
+          "format": "date",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Start of validity, if known.",
+      "title": "Valid From"
+    },
+    "valid_to": {
+      "anyOf": [
+        {
+          "format": "date",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "End of validity, if known.",
+      "title": "Valid To"
+    },
+    "license": {
+      "description": "License string, or 'unknown'.",
+      "title": "License",
+      "type": "string"
+    },
+    "legal_status": {
+      "$ref": "#/$defs/LegalStatus",
+      "description": "binding | informative | auxiliary | unknown."
+    },
+    "geometry_precision": {
+      "$ref": "#/$defs/GeometryPrecision",
+      "description": "survey | cadastral | topographic | raster_derived | approximate | unknown."
+    },
+    "freshness": {
+      "$ref": "#/$defs/Freshness",
+      "description": "current | stale | archived | unknown."
+    },
+    "confidence": {
+      "description": "Source confidence, 0.0-1.0.",
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Confidence",
+      "type": "number"
+    },
+    "notes": {
+      "default": "",
+      "description": "Free-text notes about the source.",
+      "title": "Notes",
+      "type": "string"
+    }
+  },
+  "required": [
+    "source_id",
+    "source_type",
+    "publisher",
+    "url_or_origin",
+    "retrieved_at",
+    "license",
+    "legal_status",
+    "geometry_precision",
+    "freshness",
+    "confidence"
+  ],
+  "type": "object"
+}

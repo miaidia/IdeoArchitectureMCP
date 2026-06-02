@@ -1,0 +1,105 @@
+"""plot_domain — Pydantic v2 domain models for the Plot Analyzer (base_assumptions §11).
+
+The models here depend ONLY on pydantic (Phase 1.4 decoupling). The persistence
+ORM lives in :mod:`plot_domain.db`, which is intentionally NOT imported here so
+importing the domain models never pulls in SQLAlchemy / GeoAlchemy2.
+"""
+
+from plot_domain.enums import (
+    AnalysisMode,
+    AnalysisStatus,
+    ConfidenceLevel,
+    Decision,
+    Freshness,
+    GeometryPrecision,
+    InvestmentType,
+    LegalStatus,
+    PlanningActType,
+    RiskStatus,
+    RiskType,
+    Severity,
+    SourceType,
+)
+from plot_domain.models import (
+    AdministrativeContext,
+    AnalysisInput,
+    AnalysisInputData,
+    AnalysisOptions,
+    AnalysisResult,
+    AnalysisRun,
+    AnalysisScores,
+    BuildableEnvelope,
+    CapacityScenario,
+    Constraint,
+    EvidenceItem,
+    InvestmentArea,
+    InvestmentGoal,
+    NoBuildZone,
+    Override,
+    Parcel,
+    PlanningAct,
+    PlanningIndicator,
+    PlanningZone,
+    PointInput,
+    Recommendation,
+    ReportArtifact,
+    RiskItem,
+    RoadAccess,
+    Ruleset,
+    SourceRecord,
+    TerrainModel,
+    UnknownItem,
+    UtilityNetwork,
+)
+from plot_domain.result import ModuleResult
+
+__version__ = "0.1.0"
+
+__all__ = [
+    # result envelope
+    "ModuleResult",
+    # enums
+    "AnalysisMode",
+    "AnalysisStatus",
+    "ConfidenceLevel",
+    "Decision",
+    "Freshness",
+    "GeometryPrecision",
+    "InvestmentType",
+    "LegalStatus",
+    "PlanningActType",
+    "RiskStatus",
+    "RiskType",
+    "Severity",
+    "SourceType",
+    # entities §11.1
+    "AdministrativeContext",
+    "AnalysisInput",
+    "AnalysisInputData",
+    "AnalysisOptions",
+    "AnalysisResult",
+    "AnalysisRun",
+    "AnalysisScores",
+    "BuildableEnvelope",
+    "CapacityScenario",
+    "Constraint",
+    "EvidenceItem",
+    "InvestmentArea",
+    "InvestmentGoal",
+    "NoBuildZone",
+    "Override",
+    "Parcel",
+    "PlanningAct",
+    "PlanningIndicator",
+    "PlanningZone",
+    "PointInput",
+    "Recommendation",
+    "ReportArtifact",
+    "RiskItem",
+    "RoadAccess",
+    "Ruleset",
+    "SourceRecord",
+    "TerrainModel",
+    "UnknownItem",
+    "UtilityNetwork",
+]

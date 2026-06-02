@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://plot-analyzer/schemas/constraint.schema.json",
+  "title": "Constraint",
+  "$defs": {
+    "LegalStatus": {
+      "description": "Legal status of a source / constraint (base_assumptions §5, §11.3).",
+      "enum": [
+        "binding",
+        "informative",
+        "auxiliary",
+        "unknown"
+      ],
+      "title": "LegalStatus",
+      "type": "string"
+    },
+    "Severity": {
+      "description": "Severity scale (base_assumptions §11.2 ``severity``).",
+      "enum": [
+        "info",
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
+      "title": "Severity",
+      "type": "string"
+    }
+  },
+  "description": "A geometric or descriptive constraint — mirrors base_assumptions §11.3 exactly.",
+  "properties": {
+    "constraint_id": {
+      "description": "Constraint identifier.",
+      "title": "Constraint Id",
+      "type": "string"
+    },
+    "constraint_type": {
+      "description": "Constraint type (free string).",
+      "title": "Constraint Type",
+      "type": "string"
+    },
+    "source_id": {
+      "description": "Source record id.",
+      "title": "Source Id",
+      "type": "string"
+    },
+    "source_legal_status": {
+      "$ref": "#/$defs/LegalStatus",
+      "description": "binding | informative | auxiliary | unknown."
+    },
+    "geometry": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Constraint geometry (GeoJSON) in EPSG:2180, or null.",
+      "title": "Geometry"
+    },
+    "applies_to_area_m2": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Area the constraint applies to, in m^2.",
+      "title": "Applies To Area M2"
+    },
+    "applies_to_percent": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Percent of the parcel/area the constraint applies to.",
+      "title": "Applies To Percent"
+    },
+    "rule_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Rule id that produced this constraint.",
+      "title": "Rule Id"
+    },
+    "rule_version": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Version of the applied rule.",
+      "title": "Rule Version"
+    },
+    "severity": {
+      "$ref": "#/$defs/Severity",
+      "description": "info | low | medium | high | critical."
+    },
+    "confidence": {
+      "description": "Confidence, 0.0-1.0.",
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Confidence",
+      "type": "number"
+    },
+    "human_summary": {
+      "description": "Human-readable summary of the constraint.",
+      "title": "Human Summary",
+      "type": "string"
+    },
+    "machine_summary": {
+      "additionalProperties": true,
+      "description": "Machine-readable structured summary.",
+      "title": "Machine Summary",
+      "type": "object"
+    },
+    "mitigation": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Possible mitigation, if any.",
+      "title": "Mitigation"
+    }
+  },
+  "required": [
+    "constraint_id",
+    "constraint_type",
+    "source_id",
+    "source_legal_status",
+    "severity",
+    "confidence",
+    "human_summary"
+  ],
+  "type": "object"
+}
