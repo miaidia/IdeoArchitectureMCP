@@ -17,12 +17,15 @@ dependencies = [
     "plot-shared",
     "plot-domain",
     "plot-rules",
+    # Phase 3: deterministic map render + artifact store for the image-content path.
+    "plot-reports",
 ]
 
 [tool.uv.sources]
 plot-shared = { workspace = true }
 plot-domain = { workspace = true }
 plot-rules = { workspace = true }
+plot-reports = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

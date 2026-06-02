@@ -105,6 +105,13 @@ module = [
     "structlog.*",
     "prometheus_client.*",
     "opentelemetry.*",
+    # Phase 3 render/screenshot stack — no bundled type stubs / py.typed markers.
+    "shapely.*",
+    "geopandas.*",
+    "contextily.*",
+    "matplotlib.*",
+    "boto3.*",
+    "playwright.*",
 ]
 ignore_missing_imports = true
 

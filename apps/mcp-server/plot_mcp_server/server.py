@@ -1,9 +1,17 @@
-"""Thin FastMCP server for the Plot Analyzer (Phase 2 §2.1).
+"""Thin FastMCP server for the Plot Analyzer (Phase 2 §2.1, extended in Phase 3 §3.1.3).
 
-Exposes the 20 public tools (base_assumptions §10.3), resource templates (§10.4) and
-prompts (§10.5) as typed STUBS. All domain work is delegated to the reloadable
-``usecases`` module via ``AppContext`` (``runtime.py``) so hot-reload never touches
-the transport (Phase 0.5 / §2.4).
+Exposes the 20 §10.3 analysis tools plus the Phase 3 ``map_preview`` verify tool
+(21 public total), resource templates (§10.4) and prompts (§10.5). Most are typed
+STUBS delegating to the reloadable ``usecases`` module via ``AppContext``
+(``runtime.py``) so hot-reload never touches the transport (Phase 0.5 / §2.4). The
+``map_preview`` tool + ``analysis://{id}/map-preview.png`` resource are wired to the
+real Phase 3 renderer (``plot_reports``) so Claude Code SEES the rendered map.
+
+Image-content API (verified against installed mcp 1.27.2):
+  * ``from mcp.server.fastmcp import Image``                       (mcp/server/fastmcp/utilities/types.py:9)
+  * tool returning ``Image`` → ``Image.to_image_content()`` →
+    ``ImageContent(type="image", data=<base64>, mimeType=...)``    (types.py:44; func_metadata.py:524)
+  * a resource returning ``bytes`` → BlobResourceContents          (resources/types.py:31 BinaryResource)
 
 SDK APIs used here are copied from IMPLEMENTATION_PLAN.md Phase 0.1 and verified
 against the installed ``mcp`` 1.27.2 source:
@@ -30,7 +38,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any
 
-from mcp.server.fastmcp import Context, FastMCP  # Phase 0.1 allowed imports
+from mcp.server.fastmcp import Context, FastMCP, Image  # Phase 0.1 allowed imports
 from mcp.server.session import ServerSession  # Phase 0.1 allowed imports
 from mcp.types import ToolAnnotations  # Phase 0.2 annotations; mcp/server/fastmcp/server.py:68
 from plot_domain import AnalysisInput, AnalysisResult
@@ -313,6 +321,35 @@ def manual_override(
     return _app(ctx).usecases.manual_override(analysis_id, target_type, target_id, reason, user_id)
 
 
+# --- Dedicated inline map-preview / verify tool (Phase 3 §3.1.3, NFR-PERF-009) --- #
+# This is the EXPLICIT preview/verify call that returns the rendered map INLINE as an
+# MCP image content block so Claude Code literally SEES the map (the "screenshot for
+# verification" channel). Default artifact delivery is a resource_link via
+# report_generate(format="png"); inlining happens only here (Phase 3 §3.4 anti-pattern).
+@mcp.tool(
+    annotations=_READ_ONLY,
+    description="Render the buildable-envelope map preview INLINE as an image for visual verification.",
+    structured_output=False,  # return an image content block, not structured JSON
+)
+def map_preview(
+    analysis_id: Annotated[str | None, Field(description="Analysis run id (sample geometry until Phase 7).")] = None,
+    fmt: Annotated[str, Field(description="png (inline image) — svg returns the markup as text.")] = "png",
+    *,
+    ctx: Context[ServerSession, AppContext],
+) -> Image:
+    # ``Image`` is the FastMCP image helper (Phase 0.1). On return, FastMCP calls
+    # Image.to_image_content() → ImageContent(type="image", data=<base64>,
+    # mimeType="image/png") — verified at
+    # .venv/.../mcp/server/fastmcp/utilities/types.py:44 to_image_content() and
+    # .venv/.../mcp/server/fastmcp/utilities/func_metadata.py:524 (_convert_to_content
+    # returns [result.to_image_content()] for an Image).
+    from plot_reports import render_preview
+
+    result = render_preview(analysis_id=analysis_id, fmt="png" if fmt != "svg" else "svg")
+    # Image(format="png") → mimeType "image/png" (types.py _get_mime_type).
+    return Image(data=result.data, format="png" if result.mime_type == "image/png" else "svg")
+
+
 @mcp.tool(annotations=_READ_ONLY, description="Run diagnostics for debugging and QA.")
 def diagnostics_run(
     ctx: Context[ServerSession, AppContext],
@@ -418,11 +455,15 @@ def resource_report_md(analysis_id: str) -> str:
     return f"# Analysis {analysis_id}\n\n_Report not yet computed (Phase 3/10)._\n"
 
 
-@mcp.resource("analysis://{analysis_id}/map-preview.png", mime_type="application/json")
-def resource_map_preview(analysis_id: str) -> str:
-    # The actual PNG image is returned via a tool image content block (Phase 3);
-    # this resource only advertises availability to avoid inlining a blob here.
-    return json.dumps({"analysis_id": analysis_id, "status": "not_yet_computed", "note": "PNG via Phase 3 image block."})
+@mcp.resource("analysis://{analysis_id}/map-preview.png", mime_type="image/png")
+def resource_map_preview(analysis_id: str) -> bytes:
+    # Phase 3: return the rendered PNG bytes. A FastMCP resource that returns ``bytes``
+    # is serialised as a BlobResourceContents (verified in
+    # .venv/.../mcp/server/fastmcp/resources/types.py:31 BinaryResource / read()->bytes),
+    # so this is fetched on demand rather than inlined into a tool result (NFR-PERF-009).
+    from plot_reports import preview_png_bytes
+
+    return preview_png_bytes(analysis_id)
 
 
 @mcp.resource("planning://{municipality_id}/acts", mime_type="application/json")

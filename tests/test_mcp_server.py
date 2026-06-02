@@ -50,6 +50,8 @@ PUBLIC_TOOLS = {
     "document_ingest",
     "manual_override",
     "diagnostics_run",
+    # Phase 3 §3.1.3: inline map-preview / verify tool (image content block).
+    "map_preview",
 }
 
 
@@ -77,7 +79,8 @@ async def test_lists_20_public_tools_dev_off(monkeypatch: pytest.MonkeyPatch) ->
         names = {t.name for t in result.tools}
     assert PUBLIC_TOOLS <= names, f"missing: {PUBLIC_TOOLS - names}"
     assert "dev_reload" not in names, "dev_reload must be absent when dev_hot_reload=False"
-    assert len(names) == 20
+    # 20 §10.3 tools + Phase 3 map_preview = 21 public tools.
+    assert len(names) == 21
 
 
 @pytest.mark.anyio
@@ -87,7 +90,13 @@ async def test_dev_reload_present_when_dev_on(monkeypatch: pytest.MonkeyPatch) -
         names = {t.name for t in (await client.list_tools()).tools}
     assert "dev_reload" in names
     assert PUBLIC_TOOLS <= names
-    assert len(names) == 21
+    # 21 public + dev_reload = 22 when dev_hot_reload=True.
+    assert len(names) == 22
+
+
+# map_preview returns an MCP image content block (structured_output=False), so it
+# intentionally has no outputSchema (Phase 3 §3.1.3); every other tool must have one.
+_NO_OUTPUT_SCHEMA = {"map_preview"}
 
 
 @pytest.mark.anyio
@@ -96,6 +105,9 @@ async def test_every_tool_has_output_schema(monkeypatch: pytest.MonkeyPatch) -> 
     async with create_connected_server_and_client_session(mcp) as client:
         tools = (await client.list_tools()).tools
     for t in tools:
+        if t.name in _NO_OUTPUT_SCHEMA:
+            assert t.outputSchema is None, f"{t.name} should have no outputSchema (image tool)"
+            continue
         assert t.outputSchema is not None, f"{t.name} has no outputSchema"
 
 

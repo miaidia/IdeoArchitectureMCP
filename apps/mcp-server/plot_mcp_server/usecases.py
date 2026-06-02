@@ -173,7 +173,36 @@ def sources_collect(analysis_id: str | None) -> dict[str, Any]:
 
 
 def report_generate(analysis_id: str | None, fmt: str) -> dict[str, Any]:
-    """Stub report artifact. Real render (md/html/pdf/png) lands in Phase 3/Phase 10."""
+    """Report artifact metadata. For ``png`` the map preview is rendered (Phase 3) and
+    stored, returning a ``resource_link``-shaped descriptor by DEFAULT — the image is
+    NOT inlined into every result (NFR-PERF-009 / Phase 3 §3.4). Inline image content
+    is only returned by the dedicated ``map_preview`` tool / resource preview path.
+
+    Other formats (md/html/pdf/json) remain stubs until Phase 10.
+    """
+    if fmt == "png":
+        # Render the Phase 3 sample preview + persist it (+ style.json sidecar) to the
+        # default filesystem artifact store; advertise it as a resource_link target.
+        from plot_reports import get_artifact_store, render_preview
+
+        aid = analysis_id or _new_id()
+        result = render_preview(analysis_id=aid, fmt="png")
+        store = get_artifact_store()
+        key = f"analysis/{aid}/map-preview.png"
+        uri = store.put_render(key, result)
+        return {
+            "analysis_id": aid,
+            "format": "png",
+            # resource_link descriptor — Claude Code fetches the bytes on demand from
+            # the analysis://{id}/map-preview.png resource (NFR-PERF-009 default path).
+            "artifact_uri": uri,
+            "resource_link": f"analysis://{aid}/map-preview.png",
+            "mime_type": result.mime_type,
+            "byte_size": len(result.data),
+            "style_metadata": result.style_metadata,  # CRS + layers + style (NFR-AUD-009)
+            "status": "rendered",
+            "note": "Image returned as resource_link by default; inline via map_preview (NFR-PERF-009).",
+        }
     return {
         "analysis_id": analysis_id,
         "format": fmt,

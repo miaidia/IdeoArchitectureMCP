@@ -1,9 +1,33 @@
-# plot-reports — workspace member. Stub package (no runtime code yet); deferred to a later phase.
+# plot-reports — deterministic map rendering + artifact storage + web-map screenshots (Phase 3).
 [project]
 name = "plot-reports"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = []
+# Spatial/render stack (IMPLEMENTATION_PLAN.md Phase 0.4 "Map render" + "Screenshots").
+dependencies = [
+    # Deterministic vector render (Agg backend) + SVG/PNG savefig (Phase 0.4 "Map render").
+    "matplotlib>=3.8",
+    # GeoDataFrame plotting + GeoJSON/shapely interop (Phase 0.4 "Dataframes / IO").
+    "geopandas>=1.0",
+    # Vector geometry 2.x (Phase 0.4 "Vector geometry").
+    "shapely>=2.0",
+    # CRS handling for EPSG:2180 style metadata (Phase 0.4 "CRS transform").
+    "pyproj>=3.6",
+    # Optional tile basemap — only used when basemap=True; never in deterministic tests.
+    "contextily>=1.6",
+    # Pixel-diff golden-image comparison (Phase 3 §3.3) + image bytes handling.
+    "pillow>=10.0",
+    "numpy>=1.26",
+    # Headless web-map screenshots (Phase 0.4 "Screenshots (web map)" / Phase 3 §3.1.3).
+    "playwright>=1.44",
+    # Workspace deps. plot-reports must NOT import plot_connectors / plot_rules (§3.4).
+    "plot-domain",
+    "plot-shared",
+]
+
+[tool.uv.sources]
+plot-domain = { workspace = true }
+plot-shared = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
