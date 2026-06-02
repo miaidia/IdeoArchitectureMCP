@@ -53,6 +53,8 @@ dev = [
     "pytest>=8",
     "jsonschema>=4.21",
     "types-PyYAML>=6.0",
+    # Property-based tests for the geometry core (Phase 5 §5.3, F-0547).
+    "hypothesis>=6.100",
 ]
 
 [tool.ruff]
