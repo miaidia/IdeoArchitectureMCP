@@ -1,9 +1,31 @@
-# plot-envelope — workspace member. Stub package (no runtime code yet); deferred to a later phase.
+# plot-envelope — overlay/constraints engine + buildable envelope v1 + risk/decision (Phase 7).
+#
+# Turns fetched risk-layer geometry + parcel geometry into Constraints (§11.3), NoBuildZones,
+# a BuildableEnvelope v1 (parcel − setbacks − no-build, with largest inscribed rectangle and
+# source-ranked confidence, §7.5), and the red-flag + decision classifier with hard-blocker
+# dominance (§14.2). It is a pure-geometry + rules-threshold layer: it depends on plot_geo
+# (metric overlay/buffer), plot_domain (Constraint/NoBuildZone/BuildableEnvelope/RiskItem),
+# plot_rules (setback/buffer thresholds), plot_shared. It MUST NOT import plot_connectors
+# (it consumes already-fetched geometry) — keeping connectors↛rules and rules↛connectors intact.
 [project]
 name = "plot-envelope"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    # Vector geometry 2.x for intersection / buffer / difference / area (Phase 0.4).
+    "shapely>=2.0",
+    # Workspace deps.
+    "plot-domain",
+    "plot-shared",
+    "plot-geo",
+    "plot-rules",
+]
+
+[tool.uv.sources]
+plot-domain = { workspace = true }
+plot-shared = { workspace = true }
+plot-geo = { workspace = true }
+plot-rules = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

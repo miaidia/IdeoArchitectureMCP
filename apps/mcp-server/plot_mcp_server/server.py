@@ -489,33 +489,86 @@ def resource_analysis_summary(analysis_id: str) -> str:
 
 @mcp.resource("analysis://{analysis_id}/result.json", mime_type="application/json")
 def resource_analysis_result(analysis_id: str) -> str:
-    return json.dumps({"analysis_id": analysis_id, "status": "not_yet_computed"})
+    from plot_agent.analysis import DEFAULT_STORE
+
+    result = DEFAULT_STORE.get(analysis_id)
+    if result is None:
+        return json.dumps({"analysis_id": analysis_id, "status": "not_found"})
+    return result.model_dump_json()
 
 
 @mcp.resource("analysis://{analysis_id}/evidence", mime_type="application/json")
 def resource_analysis_evidence(analysis_id: str) -> str:
-    return json.dumps({"analysis_id": analysis_id, "evidence": [], "status": "not_yet_computed"})
+    from plot_agent.analysis import DEFAULT_STORE
+
+    result = DEFAULT_STORE.get(analysis_id)
+    if result is None:
+        return json.dumps({"analysis_id": analysis_id, "evidence": [], "status": "not_found"})
+    return json.dumps(
+        {
+            "analysis_id": analysis_id,
+            "evidence": [e.model_dump(mode="json") for e in result.evidence],
+            "sources": result.planning.get("_sources", []) if isinstance(result.planning, dict) else [],
+        }
+    )
 
 
 @mcp.resource("analysis://{analysis_id}/risks", mime_type="application/json")
 def resource_analysis_risks(analysis_id: str) -> str:
-    return json.dumps({"analysis_id": analysis_id, "risks": [], "status": "not_yet_computed"})
+    from plot_agent.analysis import DEFAULT_STORE
+
+    result = DEFAULT_STORE.get(analysis_id)
+    if result is None:
+        return json.dumps({"analysis_id": analysis_id, "risks": [], "status": "not_found"})
+    return json.dumps({"analysis_id": analysis_id, "risks": [r.model_dump(mode="json") for r in result.risks]})
 
 
 @mcp.resource("analysis://{analysis_id}/unknowns", mime_type="application/json")
 def resource_analysis_unknowns(analysis_id: str) -> str:
-    return json.dumps({"analysis_id": analysis_id, "unknowns": [], "status": "not_yet_computed"})
+    from plot_agent.analysis import DEFAULT_STORE
+
+    result = DEFAULT_STORE.get(analysis_id)
+    if result is None:
+        return json.dumps({"analysis_id": analysis_id, "unknowns": [], "status": "not_found"})
+    return json.dumps({"analysis_id": analysis_id, "unknowns": [u.model_dump(mode="json") for u in result.unknowns]})
 
 
 @mcp.resource("analysis://{analysis_id}/buildable-envelope.geojson", mime_type="application/geo+json")
 def resource_buildable_envelope(analysis_id: str) -> str:
-    # GeoJSON returned as a resource on demand, never inlined into tool results.
-    return json.dumps({"type": "FeatureCollection", "features": [], "status": "not_yet_computed"})
+    # GeoJSON returned as a resource ON DEMAND, never inlined into tool results
+    # (NFR-PERF-009 / §10.4). Builds a FeatureCollection of the buildable polygon, its
+    # largest inscribed rectangle and the parcel from the stored result.
+    from plot_agent.analysis import DEFAULT_STORE
+
+    result = DEFAULT_STORE.get(analysis_id)
+    if result is None or result.buildable_envelope is None:
+        return json.dumps({"type": "FeatureCollection", "features": [], "status": "not_found"})
+    env = result.buildable_envelope
+    features: list[dict[str, Any]] = []
+    if result.parcel and result.parcel.geometry:
+        features.append({"type": "Feature", "properties": {"role": "parcel"}, "geometry": result.parcel.geometry})
+    if env.geometry:
+        features.append(
+            {"type": "Feature", "properties": {"role": "buildable_envelope", "area_m2": env.area_m2,
+                                               "confidence": env.confidence}, "geometry": env.geometry}
+        )
+    if env.largest_inscribed_rectangle:
+        features.append(
+            {"type": "Feature", "properties": {"role": "largest_inscribed_rectangle"},
+             "geometry": env.largest_inscribed_rectangle}
+        )
+    return json.dumps({"type": "FeatureCollection", "crs_note": "EPSG:2180", "features": features})
 
 
 @mcp.resource("analysis://{analysis_id}/report.md", mime_type="text/markdown")
 def resource_report_md(analysis_id: str) -> str:
-    return f"# Analysis {analysis_id}\n\n_Report not yet computed (Phase 3/10)._\n"
+    from plot_agent.analysis import DEFAULT_STORE
+    from plot_reports import render_markdown
+
+    result = DEFAULT_STORE.get(analysis_id)
+    if result is None:
+        return f"# Analysis {analysis_id}\n\n_Brak zapisanej analizy o tym id. Uruchom parcel_analyze._\n"
+    return render_markdown(result)
 
 
 @mcp.resource("analysis://{analysis_id}/map-preview.png", mime_type="image/png")

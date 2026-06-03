@@ -35,6 +35,12 @@ from plot_reports.render import (
     RenderResult,
     render_map,
 )
+from plot_reports.report import (
+    headline_numbers,
+    render_envelope_map,
+    render_json,
+    render_markdown,
+)
 from plot_reports.screenshot import (
     BrowserUnavailableError,
     leaflet_preview_html,
@@ -51,6 +57,11 @@ __all__ = [
     "RenderResult",
     "render_map",
     "RENDERER_VERSION",
+    # report (Phase 7 §7.1.5 / §22)
+    "render_markdown",
+    "render_json",
+    "render_envelope_map",
+    "headline_numbers",
     # artifacts
     "ArtifactStore",
     "LocalArtifactStore",

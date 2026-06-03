@@ -1475,7 +1475,10 @@ name = "plot-agent"
 version = "0.1.0"
 source = { editable = "packages/agent" }
 dependencies = [
+    { name = "plot-connectors" },
     { name = "plot-domain" },
+    { name = "plot-envelope" },
+    { name = "plot-geo" },
     { name = "plot-reports" },
     { name = "plot-rules" },
     { name = "plot-shared" },
@@ -1485,7 +1488,10 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "plot-connectors", editable = "packages/connectors" },
     { name = "plot-domain", editable = "packages/domain" },
+    { name = "plot-envelope", editable = "packages/envelope" },
+    { name = "plot-geo", editable = "packages/geo" },
     { name = "plot-reports", editable = "packages/reports" },
     { name = "plot-rules", editable = "packages/rules" },
     { name = "plot-shared", editable = "packages/shared" },
@@ -1621,6 +1627,22 @@ requires-dist = [
 name = "plot-envelope"
 version = "0.1.0"
 source = { editable = "packages/envelope" }
+dependencies = [
+    { name = "plot-domain" },
+    { name = "plot-geo" },
+    { name = "plot-rules" },
+    { name = "plot-shared" },
+    { name = "shapely" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "plot-domain", editable = "packages/domain" },
+    { name = "plot-geo", editable = "packages/geo" },
+    { name = "plot-rules", editable = "packages/rules" },
+    { name = "plot-shared", editable = "packages/shared" },
+    { name = "shapely", specifier = ">=2.0" },
+]
 
 [[package]]
 name = "plot-evidence"

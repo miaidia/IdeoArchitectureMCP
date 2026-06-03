@@ -1,4 +1,4 @@
-"""Reloadable use-case layer for the MCP server (Phase 2 §2.1.2 / §2.4).
+"""Reloadable use-case layer for the MCP server (Phase 2 §2.1.2 / §2.4; Phase 7 §E).
 
 The thin tool functions in ``server.py`` delegate all domain work to the functions
 in this module. This module holds NO MCP/transport state, so it can be safely
@@ -6,9 +6,16 @@ in this module. This module holds NO MCP/transport state, so it can be safely
 the live stdio pipe to Claude Code (Phase 2 anti-pattern: never reload the transport
 from within itself — IMPLEMENTATION_PLAN.md Phase 0.5 / §2.4).
 
-Everything here returns schema-valid STUBS. The real analysis logic (and the
-thin-proxy-to-worker delegation, §27 shared use-cases) lands in Phase 7 / Phase 12;
-each stub records that in its ``unknowns``.
+Phase 7 §E wires the MVP analysis surface to the REAL §27 shared use-cases
+(``plot_agent.analysis.run_quick_screening``): ``parcel_resolve`` → ULDK,
+``parcel_analyze`` (quick_screening) → orchestrator, ``analysis_get_status`` /
+``analysis_get_result`` → the in-memory :class:`~plot_agent.analysis.AnalysisStore`,
+``report_generate`` (md/json) → the real report, ``risks_list`` → real risks/unknowns,
+``sources_collect`` → the evidence pack. Connectors are INJECTED (default = the
+production bundle); tests pass mocks so no live network is used. The buildable envelope
+is exposed as the ``analysis://{id}/buildable-envelope.geojson`` resource, never inlined
+(NFR-PERF-009). Phases the MVP gate does not cover (capacity, full planning parse) stay
+stubs and record that in their ``unknowns`` / notes.
 """
 
 from __future__ import annotations
@@ -17,6 +24,12 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from plot_agent.analysis import (
+    DEFAULT_STORE,
+    Connectors,
+    build_default_connectors,
+    run_quick_screening,
+)
 from plot_domain import (
     AnalysisInput,
     AnalysisResult,
@@ -39,9 +52,27 @@ from plot_domain.enums import (
 # Marker version so reload is observable in tests/diagnostics even when ruleset
 # content is unchanged. Bump-by-reload is verified via the registry hash, but this
 # string also lets a test confirm the module object was re-imported.
-USECASES_BUILD = "phase2-stub"
+USECASES_BUILD = "phase7-mvp"
 
 PHASE7_NOTE = "Stub: analysis logic lands in Phase 7; MCP delegates to the worker in Phase 12."
+PHASE9_NOTE = "Stub: capacity scenarios (chłonność, §8.5) land in Phase 9."
+PHASE8_NOTE = "Stub: deep planning parsing (MPZP/POG/WZ, §8.3) lands in Phase 8."
+
+# Injectable connector bundle for the analysis use-cases. The MCP server uses the
+# production bundle by default; tests set this to a mock so the run is zero-network.
+_CONNECTORS: Connectors | None = None
+
+
+def set_connectors(connectors: Connectors | None) -> None:
+    """Override the connector bundle used by ``parcel_analyze`` (tests inject mocks)."""
+    global _CONNECTORS
+    _CONNECTORS = connectors
+
+
+def _get_connectors() -> Connectors:
+    if _CONNECTORS is not None:
+        return _CONNECTORS
+    return build_default_connectors()
 
 
 def _new_id() -> str:
@@ -52,62 +83,125 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def _run_async(coro: Any) -> Any:
+    """Run an async use-case from a SYNC MCP tool function.
+
+    The FastMCP tool wrappers here are synchronous but are invoked from inside the
+    server's running event loop, so ``asyncio.run`` would raise "loop already running".
+    We run the coroutine on a dedicated worker thread with its own loop instead. When
+    there is NO running loop (unit tests calling the use-case directly), we just use
+    ``asyncio.run``.
+    """
+    import asyncio
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # No running loop → safe to drive it directly.
+        return asyncio.run(coro)
+
+    # A loop is running on this thread; offload to a worker thread with a fresh loop.
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+
 # --------------------------------------------------------------------------- #
 # Read-only analysis surface (§10.3)
 # --------------------------------------------------------------------------- #
 def parcel_resolve(payload: dict[str, Any]) -> dict[str, Any]:
-    """Stub parcel resolution. Real ULDK resolution lands in Phase 6 (Phase 0.3)."""
-    return Parcel(
-        id=_new_id(),
-        external_id=payload.get("parcel_id"),
-        teryt=None,
-        number=payload.get("parcel_id"),
-        input_crs="EPSG:4326",
-    ).model_dump(mode="json")
+    """Resolve a parcel via ULDK (id or point) — real Phase 6 connector (Phase 7 §E).
+
+    Returns a Parcel-shaped dict. On a source failure / not-found it returns a Parcel with
+    a ``source_id`` of ``no_source`` and the original input echoed, never a fabricated
+    geometry (§21). Runs the async connector via :func:`anyio.from_thread`-safe runner.
+    """
+    from plot_connectors import ParcelByIdQuery, ParcelByXYQuery, ResultStatus, SourceUnavailable
+
+    connectors = _get_connectors()
+    parcel_id = payload.get("parcel_id")
+    point = payload.get("point")
+
+    async def _resolve() -> dict[str, Any]:
+        query: ParcelByIdQuery | ParcelByXYQuery | None = None
+        if parcel_id:
+            query = ParcelByIdQuery(parcel_id=str(parcel_id))
+        elif isinstance(point, dict) and "x" in point and "y" in point:
+            srid = 2180
+            crs = str(point.get("crs", "EPSG:2180")).upper()
+            if crs in ("EPSG:2180", "2180"):
+                query = ParcelByXYQuery(x=float(point["x"]), y=float(point["y"]), srid=srid)
+        if query is None:
+            return Parcel(id=_new_id(), external_id=parcel_id, number=parcel_id).model_dump(mode="json")
+        try:
+            norm = await connectors.uldk.resolve(query, snapshot=False)
+        except SourceUnavailable:
+            return Parcel(
+                id=_new_id(), external_id=parcel_id, number=parcel_id, source_id="no_source"
+            ).model_dump(mode="json")
+        if norm.status is ResultStatus.OK and "parcel" in norm.payload:
+            return norm.payload["parcel"]
+        return Parcel(id=_new_id(), external_id=parcel_id, number=parcel_id).model_dump(mode="json")
+
+    return _run_async(_resolve())
 
 
 def parcel_analyze(payload: AnalysisInput, ruleset_version: str) -> AnalysisResult:
-    """Stub full analysis: schema-valid PARTIAL result needing manual review (Phase 2 §2.1)."""
+    """Run the analysis. quick_screening → the real §27 use-case (Phase 7 §C/§E).
+
+    Other modes (full/design/portfolio) are not yet implemented; for them we run the
+    quick_screening pipeline and mark the gap in unknowns (never a fabricated full result).
+    The completed result is stored in the in-memory store so ``analysis_get_result`` /
+    ``report_generate`` / ``risks_list`` / ``sources_collect`` can return it.
+    """
+    connectors = _get_connectors()
     analysis_id = _new_id()
-    return AnalysisResult(
-        analysis_id=analysis_id,
-        status=AnalysisStatus.PARTIAL,
-        decision=Decision.NEEDS_MANUAL_REVIEW,
-        parcel=None,
-        planning={},
-        constraints=[],
-        buildable_envelope=None,
-        capacity_scenarios=[],
-        risks=[],
-        unknowns=[
-            UnknownItem(
-                id=_new_id(),
-                analysis_id=analysis_id,
-                topic="analysis_logic",
-                severity=Severity.INFO,
-                reason="no_data",
-                suggested_action=PHASE7_NOTE,
-            )
-        ],
-        next_actions=[],
-        evidence=[],
-        artifacts=[],
-    )
+
+    async def _analyze() -> AnalysisResult:
+        return await run_quick_screening(
+            payload,
+            connectors=connectors,
+            analysis_id=analysis_id,
+        )
+
+    result = _run_async(_analyze())
+    DEFAULT_STORE.put(result)
+    return result
 
 
 def analysis_get_status(analysis_id: str) -> dict[str, Any]:
-    """Stub status. Streaming progress (ctx.report_progress) wired in Phase 11."""
+    """Return real status for a stored analysis (Phase 7 §E).
+
+    Streaming progress (``ctx.report_progress``) for long async runs lands in Phase 11;
+    quick_screening completes synchronously, so a stored run is already done.
+    """
+    result = DEFAULT_STORE.get(analysis_id)
+    if result is None:
+        return {
+            "analysis_id": analysis_id,
+            "status": "not_found",
+            "progress": 0.0,
+            "partial_available": False,
+        }
     return {
         "analysis_id": analysis_id,
-        "status": AnalysisStatus.PARTIAL.value,
-        "progress": 0.0,
-        "partial_available": False,
-        "note": PHASE7_NOTE,
+        "status": result.status.value,
+        "decision": result.decision.value,
+        "progress": 1.0,
+        "partial_available": result.status is AnalysisStatus.PARTIAL,
     }
 
 
 def analysis_get_result(analysis_id: str) -> AnalysisResult:
-    """Stub stored result lookup."""
+    """Return the stored structured result (Phase 7 §E).
+
+    A missing id yields a schema-valid partial result flagging the unknown id (never an
+    error — manual_review_required / partial are normal statuses, §20.12).
+    """
+    result = DEFAULT_STORE.get(analysis_id)
+    if result is not None:
+        return result
     return AnalysisResult(
         analysis_id=analysis_id,
         status=AnalysisStatus.PARTIAL,
@@ -116,23 +210,23 @@ def analysis_get_result(analysis_id: str) -> AnalysisResult:
             UnknownItem(
                 id=_new_id(),
                 analysis_id=analysis_id,
-                topic="result_persistence",
+                topic="analysis_run",
                 severity=Severity.INFO,
-                reason="no_data",
-                suggested_action=PHASE7_NOTE,
+                reason="not_found",
+                suggested_action="Uruchomić parcel_analyze, aby utworzyć analizę o tym id.",
             )
         ],
     )
 
 
 def planning_fetch(municipality_id: str | None, parcel_id: str | None) -> dict[str, Any]:
-    """Stub planning context. Real connectors (APP/GML, BIP/SIP) land in Phase 6."""
+    """Planning context. Deep APP/GML parsing + use matrix land in Phase 8 (§8.3)."""
     return {
         "municipality_id": municipality_id,
         "parcel_id": parcel_id,
         "acts": [],
-        "status": "not_yet_computed",
-        "note": PHASE7_NOTE,
+        "coverage_status": "not_yet_parsed",
+        "note": PHASE8_NOTE,
     }
 
 
@@ -148,48 +242,117 @@ def planning_parse_document(file_id: str | None, text: str | None) -> dict[str, 
 
 
 def constraints_compute(analysis_id: str | None) -> dict[str, Any]:
-    """Stub constraint + buildable-envelope computation (geometry lands in Phase 5)."""
-    envelope = BuildableEnvelope(id=_new_id(), analysis_id=analysis_id, area_m2=None)
+    """Return the real constraints + buildable envelope from a stored analysis (Phase 7).
+
+    The heavy geometry (envelope GeoJSON) is exposed via the
+    ``analysis://{id}/buildable-envelope.geojson`` resource (NFR-PERF-009); this tool
+    returns the constraint records + an envelope summary (area / confidence / lir present).
+    """
+    result = DEFAULT_STORE.get(analysis_id) if analysis_id else None
+    if result is None:
+        envelope = BuildableEnvelope(id=_new_id(), analysis_id=analysis_id, area_m2=None)
+        return {
+            "constraints": [],
+            "buildable_envelope": envelope.model_dump(mode="json"),
+            "status": "not_found",
+        }
+    env = result.buildable_envelope
     return {
-        "constraints": [],
-        "buildable_envelope": envelope.model_dump(mode="json"),
-        "note": PHASE7_NOTE,
+        "analysis_id": analysis_id,
+        "constraints": [c.model_dump(mode="json") for c in result.constraints],
+        "buildable_envelope_summary": {
+            "area_m2": env.area_m2 if env else None,
+            "confidence": env.confidence if env else None,
+            "has_largest_inscribed_rectangle": bool(env and env.largest_inscribed_rectangle),
+            "geojson_resource": f"analysis://{analysis_id}/buildable-envelope.geojson",
+            "removed_by": env.metadata.get("removed_by", []) if env and isinstance(env.metadata, dict) else [],
+        },
     }
 
 
 def capacity_generate_scenarios(analysis_id: str | None) -> dict[str, Any]:
-    """Stub capacity scenarios (chlonnosc, §8.5; lands in Phase 9)."""
-    return {"analysis_id": analysis_id, "scenarios": [], "note": PHASE7_NOTE}
+    """Stub capacity scenarios (chłonność, §8.5; lands in Phase 9)."""
+    return {"analysis_id": analysis_id, "scenarios": [], "note": PHASE9_NOTE}
 
 
 def risks_list(analysis_id: str | None) -> dict[str, Any]:
-    """Stub red flags / risk register / unknowns (§11.2)."""
-    return {"analysis_id": analysis_id, "risks": [], "unknowns": [], "note": PHASE7_NOTE}
+    """Return the real red flags / risk register / unknowns for a stored analysis (§11.2)."""
+    result = DEFAULT_STORE.get(analysis_id) if analysis_id else None
+    if result is None:
+        return {"analysis_id": analysis_id, "risks": [], "unknowns": [], "status": "not_found"}
+    return {
+        "analysis_id": analysis_id,
+        "decision": result.decision.value,
+        "risks": [r.model_dump(mode="json") for r in result.risks],
+        "unknowns": [u.model_dump(mode="json") for u in result.unknowns],
+        "next_actions": [a.model_dump(mode="json") for a in result.next_actions],
+    }
 
 
 def sources_collect(analysis_id: str | None) -> dict[str, Any]:
-    """Stub source records + evidence pack (§5). Real collection lands in Phase 6."""
-    return {"analysis_id": analysis_id, "sources": [], "evidence": [], "note": PHASE7_NOTE}
+    """Return the source records + evidence pack for a stored analysis (§5 / NFR-AUD-001)."""
+    result = DEFAULT_STORE.get(analysis_id) if analysis_id else None
+    if result is None:
+        return {"analysis_id": analysis_id, "sources": [], "evidence": [], "status": "not_found"}
+    sources = result.planning.get("_sources", []) if isinstance(result.planning, dict) else []
+    return {
+        "analysis_id": analysis_id,
+        "sources": sources,
+        "evidence": [e.model_dump(mode="json") for e in result.evidence],
+        "evidence_count": len(result.evidence),
+    }
 
 
 def report_generate(analysis_id: str | None, fmt: str) -> dict[str, Any]:
-    """Report artifact metadata. For ``png`` the map preview is rendered (Phase 3) and
-    stored, returning a ``resource_link``-shaped descriptor by DEFAULT — the image is
-    NOT inlined into every result (NFR-PERF-009 / Phase 3 §3.4). Inline image content
-    is only returned by the dedicated ``map_preview`` tool / resource preview path.
+    """Generate a report artifact for a stored analysis (Phase 7 §E; §22 template).
 
-    Other formats (md/html/pdf/json) remain stubs until Phase 10.
+    * ``md``  → the §22 Markdown report (returned inline as ``content`` — it is small text).
+    * ``json``→ the AnalysisResult (§10.7) returned as ``content`` (and the canonical contract).
+    * ``png`` → the buildable-envelope map rendered + persisted, advertised as a
+      ``resource_link`` by DEFAULT (image NOT inlined into every result — NFR-PERF-009;
+      inline image is only via the dedicated ``map_preview`` tool).
+
+    The MD and JSON share one result object, so their headline numbers match by
+    construction (§7.3). HTML/PDF/audience variants are Phase 12.
     """
+    result = DEFAULT_STORE.get(analysis_id) if analysis_id else None
+
+    if fmt in ("md", "markdown"):
+        from plot_reports import headline_numbers, render_markdown
+
+        if result is None:
+            return {"analysis_id": analysis_id, "format": "md", "status": "not_found"}
+        return {
+            "analysis_id": analysis_id,
+            "format": "md",
+            "content": render_markdown(result),
+            "headline_numbers": headline_numbers(result),
+            "status": "rendered",
+        }
+
+    if fmt == "json":
+        from plot_reports import headline_numbers, render_json
+
+        if result is None:
+            return {"analysis_id": analysis_id, "format": "json", "status": "not_found"}
+        return {
+            "analysis_id": analysis_id,
+            "format": "json",
+            "content": render_json(result),
+            "headline_numbers": headline_numbers(result),
+            "status": "rendered",
+        }
+
     if fmt == "png":
-        # Render the Phase 3 sample preview + persist it (+ style.json sidecar) to the
-        # default filesystem artifact store; advertise it as a resource_link target.
-        from plot_reports import get_artifact_store, render_preview
+        from plot_reports import get_artifact_store, render_envelope_map, render_preview
 
         aid = analysis_id or _new_id()
-        result = render_preview(analysis_id=aid, fmt="png")
+        # Render the real buildable-envelope map when a stored result exists; otherwise
+        # fall back to the Phase 3 sample preview (so the tool always returns a valid PNG).
+        render = render_envelope_map(result) if result is not None else render_preview(analysis_id=aid, fmt="png")
         store = get_artifact_store()
         key = f"analysis/{aid}/map-preview.png"
-        uri = store.put_render(key, result)
+        uri = store.put_render(key, render)
         return {
             "analysis_id": aid,
             "format": "png",
@@ -197,18 +360,19 @@ def report_generate(analysis_id: str | None, fmt: str) -> dict[str, Any]:
             # the analysis://{id}/map-preview.png resource (NFR-PERF-009 default path).
             "artifact_uri": uri,
             "resource_link": f"analysis://{aid}/map-preview.png",
-            "mime_type": result.mime_type,
-            "byte_size": len(result.data),
-            "style_metadata": result.style_metadata,  # CRS + layers + style (NFR-AUD-009)
+            "mime_type": render.mime_type,
+            "byte_size": len(render.data),
+            "style_metadata": render.style_metadata,  # CRS + layers + style (NFR-AUD-009)
             "status": "rendered",
             "note": "Image returned as resource_link by default; inline via map_preview (NFR-PERF-009).",
         }
+
     return {
         "analysis_id": analysis_id,
         "format": fmt,
         "artifact_uri": None,
         "status": "not_yet_computed",
-        "note": "Large artifacts are returned as MCP resources, never inlined (NFR-PERF-009).",
+        "note": "HTML/PDF/audience variants land in Phase 12 (§31).",
     }
 
 
