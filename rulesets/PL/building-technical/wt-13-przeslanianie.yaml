@@ -1,0 +1,93 @@
+# WT §13 — przesłanianie / naturalne oświetlenie (Phase 8 ruleset corpus).
+# Literal wording verified against the PRIMARY consolidated text (Dz.U. 2022 poz.
+# 1225) via the ISAP/ELI API on 2026-06-10; §13 unchanged by the 2023/2024 amendments.
+id: PL-WT-13-PRZESLANIANIE-001
+title: Odleglosc obiektow przeslaniajacych od okien pomieszczen na pobyt ludzi (WT par. 13)
+jurisdiction: PL
+# Wording as consolidated in the 2022 tekst jednolity (announced 2022-06-09).
+valid_from: 2022-06-09
+valid_to: null
+source_reference: "Dz.U. 2022 poz. 1225 par. 13 ust. 1-4 (tekst jednolity WT)"
+source_quote: >-
+  "miedzy ramionami kata 60 stopni, wyznaczonego w plaszczyznie poziomej, z
+  wierzcholkiem usytuowanym w wewnetrznym licu sciany na osi okna pomieszczenia
+  przeslanianego, nie znajduje sie przeslaniajaca czesc tego samego budynku lub
+  inny obiekt przeslaniajacy w odleglosci mniejszej niz: a) wysokosc
+  przeslaniania - dla obiektow przeslaniajacych o wysokosci do 35 m, b) 35 m -
+  dla obiektow przeslaniajacych o wysokosci ponad 35 m" (ust. 1 pkt 1);
+  "Wysokosc przeslaniania [...] mierzy sie od poziomu dolnej krawedzi najnizej
+  polozonych okien budynku przeslanianego do poziomu najwyzszej zacieniajacej
+  krawedzi obiektu przeslaniajacego lub jego przeslaniajacej czesci." (ust. 2);
+  "Dopuszcza sie sytuowanie obiektu przeslaniajacego w odleglosci nie mniejszej
+  niz 10 m od okna pomieszczenia przeslanianego, takiego jak maszt, komin, wieza
+  lub inny obiekt budowlany, bez ograniczenia jego wysokosci, lecz o szerokosci
+  przeslaniajacej nie wiekszej niz 3 m, mierzac ja rownolegle do plaszczyzny
+  okna." (ust. 3); "Odleglosci, o ktorych mowa w ust. 1 pkt 1, moga byc
+  zmniejszone nie wiecej niz o polowe w zabudowie srodmiejskiej." (ust. 4)
+verification: isap_primary
+severity: hard
+inputs:
+  - obstruction_distance_m        # number — odleglosc obiektu przeslaniajacego od okna (w kacie 60 stopni)
+  - obstruction_height_m          # number — wysokosc obiektu przeslaniajacego
+  - obstruction_width_m           # number — szerokosc przeslaniajaca (rownolegle do plaszczyzny okna)
+  - wysokosc_przeslaniania_m      # number — ust. 2: od dolnej krawedzi najnizszych okien do najwyzszej zacieniajacej krawedzi
+  - zabudowa_srodmiejska          # bool — ust. 4: redukcja do polowy
+outputs:
+  - required_obstruction_distance_m
+  - applicability
+  - confidence
+logic: declarative_checks_v1
+# Conservative assumption: not zabudowa srodmiejska -> full distances required.
+input_defaults:
+  zabudowa_srodmiejska: false
+thresholds:
+  angle_deg: 60.0                 # ust. 1 pkt 1 — kat poziomy z wierzcholkiem na osi okna
+  tall_obstruction_cap_m: 35.0    # ust. 1 pkt 1 lit. b
+  narrow_obstruction_width_m: 3.0 # ust. 3
+  narrow_obstruction_distance_m: 10.0  # ust. 3
+  srodmiejska_factor: 0.5         # ust. 4 — "nie wiecej niz o polowe"
+select:
+  # ust. 1 pkt 1: height-based distances for ordinary (>3 m wide) obstructions.
+  required_distance_m:
+    - when:
+        obstruction_height_m: {max: 35.0}
+      value_from_input: wysokosc_przeslaniania_m
+    - when:
+        obstruction_height_m: {min: 35.0}
+      value: 35.0
+checks:
+  # Ordinary obstruction (>3 m wide): ust. 1 pkt 1 height-based distance. The
+  # srodmiejska 1/2 reduction of ust. 4 covers ONLY "odleglosci, o ktorych mowa
+  # w ust. 1 pkt 1" — hence the modifier lives only on this check.
+  - name: odleglosc-obiektu-przeslaniajacego
+    source_reference: "par. 13 ust. 1 pkt 1, ust. 4"
+    applies_when:
+      obstruction_width_m: {gt: 3.0}
+    input: obstruction_distance_m
+    op: gte
+    select: required_distance_m
+    modifiers:
+      - when: {zabudowa_srodmiejska: true}
+        multiply: 0.5
+        note: >-
+          par. 13 ust. 4 — zabudowa srodmiejska: odleglosci z ust. 1 pkt 1
+          zmniejszone nie wiecej niz o polowe
+  # Narrow obstruction (maszt/komin/wieza, szerokosc <=3 m): ust. 3 flat 10 m
+  # without height limit. Ust. 4 does NOT cover ust. 3, so NO srodmiejska
+  # modifier here — the 10 m stands also in zabudowa srodmiejska.
+  - name: odleglosc-waskiego-obiektu-przeslaniajacego
+    source_reference: "par. 13 ust. 3"
+    applies_when:
+      obstruction_width_m: {max: 3.0}
+    input: obstruction_distance_m
+    op: gte
+    threshold: narrow_obstruction_distance_m
+notes: >-
+  Regula dotyczy kazdej osi okna pomieszczenia przeznaczonego na pobyt ludzi —
+  walidator Phase 10 sampluje osie okien wzdluz scian z oknami i wyznacza
+  obiekty w ramionach kata 60 stopni (threshold angle_deg). Wysokosc
+  przeslaniania (ust. 2) liczy CALLER z geometrii 2.5D. Redukcja srodmiejska
+  (ust. 4) obejmuje wylacznie odleglosci z ust. 1 pkt 1 — nie obejmuje 10 m z
+  ust. 3 dla obiektow o szerokosci <=3 m. Ust. 1 pkt 2 odsyla dodatkowo do
+  par. 57 i 60 (oswietlenie i naslonecznienie) — osobna regula
+  PL-WT-60-NASLONECZNIENIE-001.

@@ -1,0 +1,84 @@
+# WT §39 — minimalny teren biologicznie czynny (PBC) na działce (Phase 8).
+# Literal wording verified against the PRIMARY amendment text (Dz.U. 2023 poz.
+# 2442, §1 pkt 4) via the ISAP/ELI API on 2026-06-10.
+id: PL-WT-39-PBC-001
+title: Minimalny udzial terenu biologicznie czynnego na dzialce (WT par. 39)
+jurisdiction: PL
+# §39 w brzmieniu Dz.U. 2023 poz. 2442, w mocy od 2024-08-01 (Dz.U. 2024 poz. 474).
+valid_from: 2024-08-01
+valid_to: null
+source_reference: >-
+  Dz.U. 2022 poz. 1225 par. 39 w brzmieniu Dz.U. 2023 poz. 2442 (w mocy od
+  2024-08-01 na mocy Dz.U. 2024 poz. 474)
+source_quote: >-
+  "Na dzialkach budowlanych przeznaczonych pod budowe budynkow mieszkalnych
+  wielorodzinnych, budynkow opieki zdrowotnej, z wyjatkiem przychodni, oraz
+  budynkow oswiaty i wychowania co najmniej 25% powierzchni dzialki nalezy
+  urzadzic jako teren biologicznie czynny, jezeli inny procent nie wynika z
+  ustalen miejscowego planu zagospodarowania przestrzennego." (ust. 1); "Na
+  dzialkach przeznaczonych pod publicznie dostepny plac o powierzchni powyzej
+  1000 m2 co najmniej 20% jego powierzchni nalezy urzadzic jako teren
+  biologicznie czynny, jezeli wyzszy procent nie wynika z ustalen miejscowego
+  planu zagospodarowania przestrzennego." (ust. 2)
+verification: isap_primary
+severity: hard
+inputs:
+  - building_type            # "wielorodzinny" | "opieki_zdrowotnej" | "oswiaty_i_wychowania" | inne
+  - pbc_ratio                # number 0-1 — projektowany udzial PBC na dzialce
+  - mpzp_pbc_known           # bool — czy MPZP okresla inny procent (ust. 1: "jezeli inny procent nie wynika...")
+  - mpzp_min_pbc_ratio       # number 0-1 — wartosc z MPZP (gdy mpzp_pbc_known)
+  - is_public_square         # bool — dzialka pod publicznie dostepny plac (ust. 2)
+  - square_area_m2           # number — powierzchnia placu
+  - square_pbc_ratio         # number 0-1 — udzial PBC placu
+outputs:
+  - required_pbc_ratio
+  - applicability
+  - confidence
+logic: declarative_checks_v1
+# Conservative assumptions: no MPZP override -> the 25% statutory floor applies;
+# not a public square -> ust. 2 check skipped.
+input_defaults:
+  mpzp_pbc_known: false
+  is_public_square: false
+thresholds:
+  statutory_min_pbc_ratio: 0.25   # ust. 1
+  square_min_pbc_ratio: 0.20      # ust. 2
+  square_trigger_area_m2: 1000.0  # ust. 2 — plac powyzej 1000 m2
+select:
+  # ust. 2 applies only to squares >1000 m2; <=1000 m2 -> no statutory minimum (0).
+  required_square_pbc_ratio:
+    - when: {square_area_m2: {max: 1000.0}}
+      value: 0.0
+    - when: {square_area_m2: {min: 1000.0}}
+      value: 0.20
+checks:
+  - name: pbc-25-procent-ustawowy
+    source_reference: "par. 39 ust. 1"
+    applies_when:
+      building_type: [wielorodzinny, opieki_zdrowotnej, oswiaty_i_wychowania]
+      mpzp_pbc_known: false
+    input: pbc_ratio
+    op: gte
+    threshold: statutory_min_pbc_ratio
+  # MPZP-determined percentage replaces the statutory 25% (ust. 1 in fine).
+  - name: pbc-wedlug-mpzp
+    source_reference: "par. 39 ust. 1 in fine"
+    applies_when:
+      building_type: [wielorodzinny, opieki_zdrowotnej, oswiaty_i_wychowania]
+      mpzp_pbc_known: true
+    input: pbc_ratio
+    op: gte
+    other_input: mpzp_min_pbc_ratio
+  - name: plac-publiczny-20-procent
+    source_reference: "par. 39 ust. 2"
+    applies_when:
+      is_public_square: true
+    input: square_pbc_ratio
+    op: gte
+    select: required_square_pbc_ratio
+notes: >-
+  Ust. 1 obejmuje (od 2024-08-01) budynki mieszkalne wielorodzinne, budynki
+  opieki zdrowotnej (z wyjatkiem przychodni) oraz budynki oswiaty i wychowania.
+  Definicja publicznie dostepnego placu: par. 3 pkt 27 WT (dodany przez Dz.U.
+  2023 poz. 2442). Co najmniej 30% powierzchni placu zabaw liczy sie do PBC —
+  patrz PL-WT-40-PLAC-ZABAW-001.

@@ -1,0 +1,65 @@
+# PUM — zasady obmiaru powierzchni użytkowej (PN-ISO 9836 + rozp. o projekcie
+# budowlanym). Phase 8 ruleset corpus. Literal wording verified against the
+# PRIMARY consolidated text (Dz.U. 2022 poz. 1679, t.j. rozp. z 11.09.2020,
+# Dz.U. 2020 poz. 1609) via the ISAP/ELI API on 2026-06-10.
+id: PL-PUM-PN-ISO-9836-001
+title: Obmiar powierzchni uzytkowej (PN-ISO 9836; skosy wg rozp. o projekcie budowlanym)
+jurisdiction: PL
+# Entry into force of the PB regulation Dz.U. 2020 poz. 1609 (per ISAP metadata).
+valid_from: 2020-09-19
+valid_to: null
+source_reference: >-
+  Rozporzadzenie MR z 11.09.2020 w sprawie szczegolowego zakresu i formy
+  projektu budowlanego, Dz.U. 2020 poz. 1609, t.j. Dz.U. 2022 poz. 1679, par. 12
+  i par. 20 ust. 1 pkt 4 lit. b oraz zalacznik nr 2 (PN-ISO 9836 — norma
+  powolana bez daty; stosuje sie najnowsza norme opublikowana w jezyku polskim,
+  obecnie PN-ISO 9836:2022-07)
+source_quote: >-
+  "Powierzchnie budynku okresla sie zgodnie z zasadami zawartymi w Polskiej
+  Normie dotyczacej okreslania i obliczania wskaznikow powierzchniowych i
+  kubaturowych wymienionej w zalaczniku nr 2 do rozporzadzenia" (par. 12);
+  "przy okreslaniu powierzchni uzytkowej powierzchnie pomieszczen lub ich
+  czesci o wysokosci w swietle rownej lub wiekszej od 2,20 m zalicza sie do
+  obliczen w 100%, o wysokosci rownej lub wiekszej od 1,40 m, lecz mniejszej od
+  2,20 m - w 50%, natomiast o wysokosci mniejszej od 1,40 m pomija sie
+  calkowicie" (par. 20 ust. 1 pkt 4 lit. b); zalacznik nr 2 lp. 12: "PN-ISO
+  9836 Wlasciwosci uzytkowe w budownictwie - Okreslanie i obliczanie wskaznikow
+  powierzchniowych i kubaturowych. *) Stosuje sie najnowsza norme opublikowana
+  w jezyku polskim."
+verification: isap_primary
+# Measurement/reference rule: it resolves counting shares, it does not gate a
+# design — soft severity.
+severity: soft
+inputs:
+  - clear_height_m       # number — wysokosc pomieszczenia (lub czesci) w swietle
+outputs:
+  - pum_count_share      # 1.0 / 0.5 / 0.0 — udzial powierzchni zaliczanej do PU
+  - applicability
+  - confidence
+logic: declarative_checks_v1
+thresholds:
+  full_count_min_height_m: 2.2   # par. 20 ust. 1 pkt 4 lit. b — >=2,20 m: 100%
+  half_count_min_height_m: 1.4   # 1,40-2,20 m: 50%; <1,40 m: 0%
+select:
+  # First matching bracket wins: >=2.2 -> 100%, >=1.4 -> 50%, else 0%.
+  pum_count_share:
+    - when: {clear_height_m: {min: 2.2}}
+      value: 1.0
+    - when: {clear_height_m: {min: 1.4}}
+      value: 0.5
+    - when: {clear_height_m: {min: 0.0}}
+      value: 0.0
+checks:
+  - name: udzial-powierzchni-przy-skosach
+    source_reference: "par. 20 ust. 1 pkt 4 lit. b"
+    op: resolve
+    select: pum_count_share
+notes: >-
+  Norma obmiaru: PN-ISO 9836 powolana BEZ DATY (zalacznik nr 2 t.j. 2022/1679)
+  — stosuje sie najnowsza edycje opublikowana po polsku, obecnie PN-ISO
+  9836:2022-07 (zastapila 9836:2015-12; roznice redakcyjne). Powierzchnie
+  mierzy sie w stanie wykonczonym, na poziomie podlogi. Heurystyka
+  PUM ~= 0.70 x powierzchnia calkowita nadziemna to CONFIG silnika chlonnosci
+  (basis: industry_heuristic), NIE prawo i NIE czesc tej reguly. Korekty PU:
+  par. 20 ust. 1 pkt 4 lit. b tiret 1-2 (odliczenia przegrod, balkonow itd.;
+  doliczenia antresoli, szaf wbudowanych) stosuje silnik obmiaru Phase 9.

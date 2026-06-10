@@ -1,0 +1,93 @@
+# WT §21 — wymiary stanowisk postojowych (Phase 8 ruleset corpus).
+# Literal wording verified against the PRIMARY consolidated text (Dz.U. 2022 poz.
+# 1225) via the ISAP/ELI API on 2026-06-10; §21 unchanged by the 2023/2024 amendments.
+id: PL-WT-21-PARKING-DIMENSIONS-001
+title: Minimalne wymiary stanowisk postojowych (WT par. 21 ust. 1)
+jurisdiction: PL
+valid_from: 2022-06-09
+valid_to: null
+source_reference: "Dz.U. 2022 poz. 1225 par. 21 ust. 1-2 (tekst jednolity WT)"
+source_quote: >-
+  "Stanowiska postojowe dla samochodow powinny miec wymiary wynoszace co
+  najmniej: 1) szerokosc 2,5 m i dlugosc 5 m - w przypadku samochodow
+  osobowych; 2) szerokosc 3,6 m i dlugosc 5 m - w przypadku samochodow
+  osobowych uzytkowanych przez osoby niepelnosprawne; 3) szerokosc 3,5 m i
+  dlugosc 8 m - w przypadku samochodow ciezarowych; 4) szerokosc 4 m i dlugosc
+  10 m - w przypadku autobusow." (ust. 1)
+verification: isap_primary
+severity: hard
+inputs:
+  - stall_type        # "standard" | "disabled" | "ciezarowy" | "autobus"
+  - stall_width_m     # number
+  - stall_length_m    # number
+outputs:
+  - required_stall_width_m
+  - required_stall_length_m
+  - applicability
+  - confidence
+logic: declarative_checks_v1
+input_defaults:
+  stall_type: standard
+thresholds:
+  standard_width_m: 2.5    # ust. 1 pkt 1
+  standard_length_m: 5.0
+  disabled_width_m: 3.6    # ust. 1 pkt 2
+  disabled_length_m: 5.0
+  truck_width_m: 3.5       # ust. 1 pkt 3
+  truck_length_m: 8.0
+  bus_width_m: 4.0         # ust. 1 pkt 4
+  bus_length_m: 10.0
+checks:
+  - name: szerokosc-osobowy
+    source_reference: "par. 21 ust. 1 pkt 1"
+    applies_when: {stall_type: standard}
+    input: stall_width_m
+    op: gte
+    threshold: standard_width_m
+  - name: dlugosc-osobowy
+    source_reference: "par. 21 ust. 1 pkt 1"
+    applies_when: {stall_type: standard}
+    input: stall_length_m
+    op: gte
+    threshold: standard_length_m
+  - name: szerokosc-niepelnosprawni
+    source_reference: "par. 21 ust. 1 pkt 2"
+    applies_when: {stall_type: disabled}
+    input: stall_width_m
+    op: gte
+    threshold: disabled_width_m
+  - name: dlugosc-niepelnosprawni
+    source_reference: "par. 21 ust. 1 pkt 2"
+    applies_when: {stall_type: disabled}
+    input: stall_length_m
+    op: gte
+    threshold: disabled_length_m
+  - name: szerokosc-ciezarowy
+    source_reference: "par. 21 ust. 1 pkt 3"
+    applies_when: {stall_type: ciezarowy}
+    input: stall_width_m
+    op: gte
+    threshold: truck_width_m
+  - name: dlugosc-ciezarowy
+    source_reference: "par. 21 ust. 1 pkt 3"
+    applies_when: {stall_type: ciezarowy}
+    input: stall_length_m
+    op: gte
+    threshold: truck_length_m
+  - name: szerokosc-autobus
+    source_reference: "par. 21 ust. 1 pkt 4"
+    applies_when: {stall_type: autobus}
+    input: stall_width_m
+    op: gte
+    threshold: bus_width_m
+  - name: dlugosc-autobus
+    source_reference: "par. 21 ust. 1 pkt 4"
+    applies_when: {stall_type: autobus}
+    input: stall_length_m
+    op: gte
+    threshold: bus_length_m
+notes: >-
+  Ust. 2 (stanowiska wzdluz jezdni — m.in. osobowe 3,6 x 6 m z mozliwoscia
+  zawezenia szerokosci do 2,5 m przy przyleglym dojsciu) pozostaje do obslugi w
+  walidatorze ukladu parkingu Phase 10. Heurystyka powierzchni manewrowej
+  (~25 m2/stanowisko) jest CONFIG, nie regula prawna.

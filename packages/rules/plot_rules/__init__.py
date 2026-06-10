@@ -1,13 +1,30 @@
-"""Declarative versioned ruleset loader (Phase 2 backbone; engine logic in Phase 8).
+"""Declarative versioned ruleset loader + evaluation engine (Phase 2 + Phase 8).
 
 Phase 2 adds :func:`load_rulesets` and an in-memory :class:`RulesetRegistry` so
 rules can be loaded *fresh* and reflected live via hot-reload (F-0133 / F-0440).
-The rule-evaluation engine (pass/fail/warning/unknown/not_applicable, traces) lands
-in Phase 8.
+Phase 8 adds the rule-evaluation engine (:func:`evaluate` ->
+``pass/fail/warning/unknown/not_applicable`` with trace, evaluation modes and the
+audited expert-override hook; base_assumptions §12, F-0128-0138) and JSON Schema
+validation of ruleset documents (:mod:`plot_rules.schema`).
 """
 
+from plot_rules.engine import EvaluationMode, RuleCheck, RuleStatus, evaluate
 from plot_rules.loader import Rule, RulesetRegistry, load_rulesets
+from plot_rules.overrides import DEFAULT_OVERRIDE_STORE, OverrideStore
+from plot_rules.schema import RULESET_SCHEMA, validate_rule_document
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
-__all__ = ["Rule", "RulesetRegistry", "load_rulesets"]
+__all__ = [
+    "DEFAULT_OVERRIDE_STORE",
+    "RULESET_SCHEMA",
+    "EvaluationMode",
+    "OverrideStore",
+    "Rule",
+    "RuleCheck",
+    "RuleStatus",
+    "RulesetRegistry",
+    "evaluate",
+    "load_rulesets",
+    "validate_rule_document",
+]

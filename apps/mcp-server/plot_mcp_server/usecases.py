@@ -52,11 +52,10 @@ from plot_domain.enums import (
 # Marker version so reload is observable in tests/diagnostics even when ruleset
 # content is unchanged. Bump-by-reload is verified via the registry hash, but this
 # string also lets a test confirm the module object was re-imported.
-USECASES_BUILD = "phase7-mvp"
+USECASES_BUILD = "phase8-planning"
 
 PHASE7_NOTE = "Stub: analysis logic lands in Phase 7; MCP delegates to the worker in Phase 12."
 PHASE9_NOTE = "Stub: capacity scenarios (chłonność, §8.5) land in Phase 9."
-PHASE8_NOTE = "Stub: deep planning parsing (MPZP/POG/WZ, §8.3) lands in Phase 8."
 
 # Injectable connector bundle for the analysis use-cases. The MCP server uses the
 # production bundle by default; tests set this to a mock so the run is zero-network.
@@ -220,24 +219,282 @@ def analysis_get_result(analysis_id: str) -> AnalysisResult:
 
 
 def planning_fetch(municipality_id: str | None, parcel_id: str | None) -> dict[str, Any]:
-    """Planning context. Deep APP/GML parsing + use matrix land in Phase 8 (§8.3)."""
+    """Planning context: acts + zones + parcel coverage from the planning store (Phase 8).
+
+    Acts/zones come from parsed APP/GML in :data:`plot_planning.DEFAULT_PLANNING_STORE`
+    (ingested via :func:`planning_ingest_gml` / :func:`planning_ingest_from_url` — the
+    live path goes through the egress-allowlisted ``AppGmlConnector``). When ``parcel_id``
+    is given the parcel is resolved (ULDK, injected connectors) and intersected with the
+    zones → coverage % (F-0108–0111). An empty store yields ``no_planning_data`` — data
+    absence is NEVER reported as "no plan exists" (§21).
+    """
+    from dataclasses import asdict
+
+    from plot_planning import DEFAULT_PLANNING_STORE, stability_score, use_matrix_for, zone_coverage
+
+    store = DEFAULT_PLANNING_STORE
+    municipality_ids = [municipality_id] if municipality_id else store.municipalities()
+    acts = [a for mid in municipality_ids for a in store.acts_for(mid)]
+    zones = [z for mid in municipality_ids for z in store.zones_for(mid)]
+
+    if not acts:
+        return {
+            "municipality_id": municipality_id,
+            "parcel_id": parcel_id,
+            "acts": [],
+            "zones": [],
+            "coverage": [],
+            "coverage_status": "no_planning_data",
+            "note": (
+                "Brak zaimportowanych aktów planistycznych dla tej gminy w magazynie — "
+                "to NIE oznacza braku planu (§21). Zaimportować APP/GML (rejestr "
+                "urbanistyczny / gmina) albo dostarczyć dokument przez planning_parse_document."
+            ),
+        }
+
+    coverage: list[dict[str, Any]] = []
+    coverage_status = "acts_listed"
+    if parcel_id:
+        parcel_payload = parcel_resolve({"parcel_id": parcel_id})
+        geom = _payload_geometry(parcel_payload)
+        if geom is not None:
+            coverage = [asdict(c) for c in zone_coverage(geom, zones)]
+            coverage_status = "computed"
+        else:
+            coverage_status = "parcel_not_resolved"
+
     return {
         "municipality_id": municipality_id,
         "parcel_id": parcel_id,
-        "acts": [],
-        "coverage_status": "not_yet_parsed",
-        "note": PHASE8_NOTE,
+        "acts": [
+            {**a.model_dump(mode="json"), "stability": stability_score(a)} for a in acts
+        ],
+        "zones": [
+            {
+                "id": z.id,
+                "act_id": z.act_id,
+                "symbol": z.symbol,
+                "has_geometry": z.geometry is not None,
+                "attributes": z.attributes,
+                "use_matrix": use_matrix_for(z.symbol),
+            }
+            for z in zones
+        ],
+        "coverage": coverage,
+        "coverage_status": coverage_status,
+        "note": "Pokrycie stref planistycznych z APP/GML (XSD v2.0, Dz.U. 2023 poz. 2409).",
     }
 
 
-def planning_parse_document(file_id: str | None, text: str | None) -> dict[str, Any]:
-    """Stub planning-document parse. LLM-candidate + rule/evidence validation (Phase 8/§29)."""
+def _payload_geometry(parcel_payload: dict[str, Any]) -> Any:
+    """Coerce a Parcel-shaped dict (WKT or GeoJSON, EPSG:2180) to shapely or None."""
+    from shapely import from_wkt
+    from shapely.geometry import shape
+
+    wkt = parcel_payload.get("geometry_wkt")
+    if isinstance(wkt, str) and wkt.strip():
+        geom = from_wkt(wkt)
+        if geom is not None and not geom.is_empty:
+            return geom
+    geojson = parcel_payload.get("geometry")
+    if isinstance(geojson, dict):
+        geom = shape(geojson)
+        if not geom.is_empty:
+            return geom
+    return None
+
+
+def planning_ingest_gml(
+    content: bytes | str, municipality_id: str, source_id: str | None = None
+) -> dict[str, Any]:
+    """Parse an APP/GML document and ingest it into the planning store (F-0108/0109).
+
+    Not a public MCP tool — called by the connector-driven path below and by tests
+    (recorded fixtures). Malformed/unsafe GML raises through as a clear error.
+    """
+    from plot_planning import DEFAULT_PLANNING_STORE, parse_app_gml
+
+    parsed = parse_app_gml(content, municipality_id=municipality_id, source_id=source_id)
+    DEFAULT_PLANNING_STORE.ingest(municipality_id, parsed)
+    return {
+        "municipality_id": municipality_id,
+        "acts_ingested": [a.id for a in parsed.acts],
+        "zones_ingested": len(parsed.zones),
+        "warnings": parsed.warnings,
+    }
+
+
+def planning_ingest_from_url(
+    url: str, municipality_id: str, connector: Any | None = None
+) -> dict[str, Any]:
+    """Live APP/GML path: fetch via the egress-allowlisted connector → parse → store.
+
+    Reuses :class:`plot_connectors.AppGmlConnector` (SSRF allowlist + snapshot,
+    §20.13); the raw bytes are snapshotted before parsing so the source artifact is
+    reproducible. Tests inject a respx-mocked ``connector`` (zero live network).
+    """
+    from plot_connectors import AppGmlConnector, AppGmlQuery
+    from plot_connectors.profiles import get_profile
+
+    conn = connector or AppGmlConnector(get_profile("pl.app.gml.planning"))
+
+    async def _fetch() -> tuple[Any, str]:
+        raw = await conn.fetch(AppGmlQuery(url=url))  # egress allowlist runs here
+        snapshot_uri = await conn.snapshot(raw)
+        return raw, snapshot_uri
+
+    raw, snapshot_uri = _run_async(_fetch())
+    result = planning_ingest_gml(raw.content, municipality_id, source_id=conn.source_id)
+    result["snapshot_uri"] = snapshot_uri
+    result["url"] = url
+    return result
+
+
+def planning_parse_document(
+    file_id: str | None, text: str | None, candidates: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
+    """Parse a planning document with evidence (Phase 8, §29 parser DoD).
+
+    Two modes — the server never calls an LLM itself:
+
+    * **(a) deterministic** (``candidates is None``): regex extractors over ``text``
+      for the §8.1.3 indicator set, each with a verbatim source fragment + offsets;
+    * **(b) candidate validation**: the calling model supplies its own LLM
+      extraction as ``candidates``; each is validated against
+      ``schemas/planning-indicators.schema.json`` AND its cited fragment must occur
+      verbatim in the document — otherwise it is rejected with a reason (F-0550).
+
+    Runs in untrusted-content mode (NFR-SEC-002/003/009): size cap, binary
+    rejection, injection screening; document text never steers the result. Parsed
+    indicators become ``PlanningIndicator`` records with citations; missing
+    indicators become ``UnknownItem`` records — never defaults (§21).
+    """
+    from plot_domain import EvidenceItem, PlanningIndicator
+    from plot_planning import (
+        extract_indicators,
+        missing_indicators,
+        screen_document,
+        validate_candidates,
+    )
+
+    if text is None:
+        if file_id:
+            return {
+                "file_id": file_id,
+                "source_type": "file",
+                "indicators": [],
+                "evidence": [],
+                "unknowns": [],
+                "rejected": [],
+                "status": "file_store_unavailable",
+                "note": (
+                    "Sandboxowany magazyn plików (document_ingest) wchodzi w Fazie 12 — "
+                    "dostarczyć treść dokumentu parametrem 'text'."
+                ),
+            }
+        return {
+            "file_id": None,
+            "source_type": None,
+            "indicators": [],
+            "evidence": [],
+            "unknowns": [],
+            "rejected": [],
+            "status": "no_input",
+            "note": "Wymagany file_id albo text.",
+        }
+
+    screen = screen_document(text)
+    if not screen.ok:
+        return {
+            "file_id": file_id,
+            "source_type": "text",
+            "indicators": [],
+            "evidence": [],
+            "unknowns": [],
+            "rejected": [],
+            "status": "rejected_input",
+            "reason": screen.reason,
+            "security": screen.security_block(),
+        }
+
+    rejected: list[dict[str, Any]] = []
+    if candidates is not None:
+        validation = validate_candidates(text, candidates)
+        extractions = validation.accepted
+        rejected = [{"candidate": r.candidate, "reasons": r.reasons} for r in validation.rejected]
+        mode = "candidate_validation"
+    else:
+        extractions = extract_indicators(text)
+        mode = "deterministic"
+
+    source_record_id = f"doc:{file_id or 'text'}:{uuid.uuid4().hex[:8]}"
+    indicators: list[dict[str, Any]] = []
+    evidence: list[dict[str, Any]] = []
+    for ext in extractions:
+        ev = EvidenceItem(
+            id=f"ev:{uuid.uuid4().hex[:8]}",
+            analysis_id="",
+            source_id=source_record_id,
+            subject_type="planning_provision",
+            subject_id=ext.name,
+            claim=f"planning indicator '{ext.name}' extracted with verbatim citation",
+            value_json={
+                "fragment": ext.source_fragment.model_dump(),
+                "method": ext.method,
+                "redacted": ext.redacted,
+            },
+            confidence=ext.confidence,
+            created_at=_now(),
+        )
+        indicator = PlanningIndicator(
+            id=f"ind:{uuid.uuid4().hex[:8]}",
+            name=ext.name,
+            value=ext.value,
+            unit=ext.unit,
+            source_id=source_record_id,
+            evidence_id=ev.id,
+            confidence=ext.confidence,
+        )
+        evidence.append(ev.model_dump(mode="json"))
+        indicators.append(indicator.model_dump(mode="json"))
+
+    from plot_domain import UnknownItem as _UnknownItem
+    from plot_domain.enums import Severity as _Severity
+
+    unknowns = [
+        _UnknownItem(
+            id=f"unk:{uuid.uuid4().hex[:8]}",
+            analysis_id="",
+            topic=f"planning_indicator:{name}",
+            severity=_Severity.MEDIUM,
+            reason="not_found_in_document",
+            suggested_action=(
+                "Sprawdzić pełny tekst uchwały / zapytać gminę — wskaźnik pozostaje "
+                "unknown, nigdy wartość domyślna (§21)."
+            ),
+        ).model_dump(mode="json")
+        for name in missing_indicators(extractions)
+    ]
+
+    status = "parsed"
+    if rejected or screen.injection_flags:
+        # Rejected candidates / suspected injection → human eyes (§29 DoD).
+        status = "manual_review_required"
+
     return {
         "file_id": file_id,
-        "candidates": [],
-        "evidence": [],
-        "status": "not_yet_computed",
-        "note": "LLM extracts candidates only; rules+schema+evidence validate (Phase 8).",
+        "source_type": "text",
+        "mode": mode,
+        "indicators": indicators,
+        "evidence": evidence,
+        "unknowns": unknowns,
+        "rejected": rejected,
+        "security": screen.security_block(),
+        "status": status,
+        "note": (
+            "Każdy wskaźnik cytuje fragment źródłowy (NFR-AUD-002); kandydaci bez "
+            "weryfikowalnego cytatu odrzuceni (F-0550); braki pozostają unknown."
+        ),
     }
 
 
@@ -397,6 +654,9 @@ def ruleset_explain(registry: Any) -> dict[str, Any]:
         "ruleset_version": registry.ruleset_version,
         "categories": list(registry.categories),
         "rule_count": len(registry.rules),
+        # Schema-validation failures: "<path>: <error>" per skipped rule file —
+        # surfaced so a malformed YAML is visible, never silently absent.
+        "ruleset_errors": list(getattr(registry, "errors", ()) or ()),
         "rules": [
             {
                 "id": r.id,
@@ -477,11 +737,74 @@ def monitoring_create(scope: str, target_id: str, purpose: str) -> dict[str, Any
 
 
 def manual_override(
-    analysis_id: str, target_type: str, target_id: str, reason: str, user_id: str
+    analysis_id: str,
+    target_type: str,
+    target_id: str,
+    reason: str,
+    user_id: str,
+    after: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Stub expert override with audit trail (NFR-AUD-003, §16). Persistence in Phase 7."""
+    """Expert override with audit trail (Phase 8, F-0137/0138; NFR-AUD-003).
+
+    Creates an audited :class:`~plot_domain.Override` record in the
+    :data:`plot_rules.DEFAULT_OVERRIDE_STORE`. The record is RECORDED, not yet
+    applied: no production evaluation path consumes the store yet, so the tool
+    reports ``applied=False`` / ``status="recorded"`` honestly (§21).
+    ``after`` must explicitly carry a valid new ``status`` — NOTHING is
+    defaulted (§21) and an invalid status is rejected at the tool boundary.
+    """
+    from plot_rules import DEFAULT_OVERRIDE_STORE, RuleStatus
+
+    def _rejected(note: str) -> dict[str, Any]:
+        return {
+            "override_id": None,
+            "analysis_id": analysis_id,
+            "target_type": target_type,
+            "target_id": target_id,
+            "applied": False,
+            "audit_logged": False,
+            "status": "rejected",
+            "note": note,
+        }
+
+    if not after or "status" not in after:
+        return _rejected(
+            "Override wymaga jawnej wartości 'after' z polem 'status' "
+            "(np. {'status': 'pass', 'confidence': 0.95}) — nic nie jest "
+            "domyślne (§21, F-0137)."
+        )
+
+    # Validate the requested status at the tool boundary so an invalid value is
+    # a clean rejection here, not a deferred ValueError inside evaluate().
+    try:
+        RuleStatus(after["status"])
+    except ValueError:
+        allowed = ", ".join(s.value for s in RuleStatus)
+        return _rejected(
+            f"Nieprawidłowy status '{after['status']}' w 'after' — dozwolone "
+            f"wartości RuleStatus: {allowed} (F-0137)."
+        )
+
+    from plot_domain import Override
+
+    override = Override(
+        id=_new_id(),
+        analysis_id=analysis_id,
+        user_id=user_id,
+        target_type=target_type,
+        target_id=target_id,
+        before_json={},
+        after_json=dict(after),
+        reason=reason,
+        created_at=_now(),
+    )
+    DEFAULT_OVERRIDE_STORE.put(override)
+    # TODO(Phase 10): the validator evaluation path will read DEFAULT_OVERRIDE_STORE
+    # and pass the matching record into plot_rules.evaluate (override hook). Until
+    # that wiring exists the override is recorded + audited but consumed by no
+    # production path — so this tool must NOT claim "applied" (§21).
     return {
-        "override_id": _new_id(),
+        "override_id": override.id,
         "analysis_id": analysis_id,
         "target_type": target_type,
         "target_id": target_id,
@@ -489,7 +812,14 @@ def manual_override(
         "user_id": user_id,
         "applied": False,
         "audit_logged": True,
-        "note": PHASE7_NOTE,
+        "status": "recorded",
+        "audit": override.model_dump(mode="json"),
+        "note": (
+            "Override zapisany z pełnym audytem (F-0138), ale jeszcze NIE "
+            "zastosowany: ścieżka ewaluacji reguł zacznie konsumować OverrideStore "
+            "wraz z walidatorami Phase 10 (plot_rules.evaluate override hook, "
+            "F-0137). Do tego czasu applied=False (§21)."
+        ),
     }
 
 
@@ -503,13 +833,16 @@ def diagnostics_run(
     dev_hot_reload: bool,
     last_reload_at: str | None,
     server_version: str,
+    ruleset_errors: list[str] | tuple[str, ...] = (),
 ) -> dict[str, Any]:
-    """Self-diagnostics: loaded ruleset versions, connector-health stubs, reload status."""
+    """Self-diagnostics: loaded ruleset versions, schema errors, connector stubs, reload status."""
     return {
         "server_version": server_version,
         "usecases_build": USECASES_BUILD,
         "ruleset_version": ruleset_version,
         "rule_count": rule_count,
+        # Rules skipped at load time due to schema validation ("<path>: <error>").
+        "ruleset_errors": list(ruleset_errors),
         "dev_hot_reload": dev_hot_reload,
         "last_reload_at": last_reload_at,
         "connectors": _connector_health_stub(),

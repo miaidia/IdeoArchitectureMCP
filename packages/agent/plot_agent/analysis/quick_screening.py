@@ -151,12 +151,16 @@ async def run_quick_screening(
     ruleset_registry: RulesetRegistry | None = None,
     analysis_id: str | None = None,
     artifact_store: Any | None = None,
+    planning_store: Any | None = None,
 ) -> AnalysisResult:
     """Run a quick-screening analysis end-to-end (§4.1 / §18.2).
 
     ``connectors`` is the injected bundle (ULDK + risk-layer source) so no live network is
     used in tests. ``ruleset_registry`` may be supplied (e.g. the hot-reloaded one from the
-    MCP context); otherwise it is loaded fresh from ``ruleset_dir``.
+    MCP context); otherwise it is loaded fresh from ``ruleset_dir``. ``planning_store``
+    (Phase 8) defaults to :data:`plot_planning.DEFAULT_PLANNING_STORE` — when it holds
+    parsed APP/GML zones intersecting the parcel, the planning block reports real
+    coverage instead of the pending note.
     """
     analysis_id = analysis_id or str(uuid.uuid4())
     registry = ruleset_registry or load_rulesets(ruleset_dir)
@@ -275,7 +279,9 @@ async def run_quick_screening(
         )
     )
 
-    planning = _planning_summary(parcel_obj, layer_status, registry)
+    planning = _planning_summary(
+        parcel_obj, layer_status, registry, parcel_geom=parcel_geom, planning_store=planning_store
+    )
 
     status = AnalysisStatus.PARTIAL if any_source_failed else AnalysisStatus.COMPLETE
     if decision_value.value in ("NEEDS_MANUAL_REVIEW", "LIKELY_BLOCKED"):
@@ -464,17 +470,28 @@ def _planning_summary(
     parcel: Parcel | None,
     layer_status: dict[str, str],
     registry: RulesetRegistry,
+    *,
+    parcel_geom: BaseGeometry | None = None,
+    planning_store: Any | None = None,
 ) -> dict[str, Any]:
     """Build the planning context summary block (§4.1 "MPZP/POG/WZ coverage").
 
-    Deep planning parsing is Phase 8; here we report COVERAGE status: that an MPZP/POG/WZ
-    check is part of the screening and its current state (not_yet_parsed for v1) — never
-    silently claiming "no plan" (§21).
+    Phase 8: when the planning store holds parsed APP/GML zones that intersect the
+    parcel, the block reports real zone coverage (acts + symbols + coverage % +
+    stability trace, F-0108–0111/F-0126). An empty/non-intersecting store keeps the
+    explicit pending status — never silently claiming "no plan" (§21).
     """
-    return {
-        "mpzp_pog_wz": "coverage_check_pending_phase8",
-        "coverage_status": "not_yet_parsed",
-        "note": "Pełne parsowanie aktów planistycznych (MPZP/POG/WZ) wchodzi w Fazie 8.",
+    from dataclasses import asdict
+
+    from plot_planning import DEFAULT_PLANNING_STORE, stability_score, zone_coverage
+
+    summary: dict[str, Any] = {
+        "mpzp_pog_wz": "coverage_check_pending",
+        "coverage_status": "no_planning_data_in_store",
+        "note": (
+            "Brak zaimportowanych aktów planistycznych (APP/GML) dla tej lokalizacji — "
+            "to nie oznacza braku planu (§21). Użyć planning_fetch / dostarczyć dokument."
+        ),
         "ruleset_version": registry.ruleset_version,
         "municipality": (
             parcel.administrative_context.commune
@@ -482,6 +499,27 @@ def _planning_summary(
             else None
         ),
     }
+    store = planning_store if planning_store is not None else DEFAULT_PLANNING_STORE
+    if parcel_geom is None or store.is_empty():
+        return summary
+    coverage = zone_coverage(parcel_geom, store.zones_for(None))
+    if not coverage:
+        summary["coverage_status"] = "no_zone_intersection_in_store"
+        return summary
+    act_ids = {c.act_id for c in coverage}
+    acts = [a for a in (store.act_by_id(aid) for aid in sorted(act_ids)) if a is not None]
+    summary.update(
+        {
+            "mpzp_pog_wz": "covered",
+            "coverage_status": "parsed",
+            "zone_coverage": [asdict(c) for c in coverage],
+            "acts": [
+                {**a.model_dump(mode="json"), "stability": stability_score(a)} for a in acts
+            ],
+            "note": "Pokrycie stref planistycznych z APP/GML (Phase 8, F-0108–0111).",
+        }
+    )
+    return summary
 
 
 def _no_parcel_result(

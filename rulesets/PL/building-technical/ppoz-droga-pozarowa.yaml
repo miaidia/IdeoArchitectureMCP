@@ -1,0 +1,156 @@
+# Droga pożarowa — rozporządzenie MSWiA z 24.07.2009 (Phase 8 ruleset corpus).
+# Literal wording verified against the PRIMARY published text (ISAP PDF
+# D20091030.pdf via the ISAP/ELI API, §12-§14) on 2026-06-10.
+id: PL-PPOZ-DROGA-POZAROWA-001
+title: Droga pozarowa - wymagalnosc i parametry (rozp. MSWiA par. 12-14)
+jurisdiction: PL
+# Entry into force of Dz.U. 2009 nr 124 poz. 1030 (per ISAP metadata).
+valid_from: 2009-08-21
+valid_to: null
+source_reference: >-
+  Rozporzadzenie MSWiA z 24.07.2009 w sprawie przeciwpozarowego zaopatrzenia w
+  wode oraz drog pozarowych, Dz.U. 2009 nr 124 poz. 1030, par. 12-14
+source_quote: >-
+  "Droge pozarowa [...] nalezy doprowadzic do: 1) budynku zawierajacego strefe
+  pozarowa zakwalifikowana do kategorii zagrozenia ludzi ZL I lub ZL II; 2)
+  budynku nalezacego do grupy wysokosci: sredniowysoki, wysoki lub wysokosciowy,
+  zawierajacego strefe pozarowa zakwalifikowana do kategorii zagrozenia ludzi
+  ZL III, ZL IV lub ZL V" (par. 12 ust. 1); "Droga pozarowa powinna przebiegac
+  wzdluz dluzszego boku budynku [...] a w przypadku gdy krotszy bok budynku ma
+  wiecej niz 60 m - z jego dwoch stron, przy czym blizsza krawedz drogi
+  pozarowej musi byc oddalona od sciany budynku o 5-15 m dla obiektow
+  zaliczanych do kategorii zagrozenia ludzi i o 5-25 m dla pozostalych
+  obiektow." (par. 12 ust. 2); "Wyjscia z obiektow budowlanych [...] powinny
+  miec polaczenie z droga pozarowa, dojsciem o szerokosci minimalnej 1,5 m i
+  dlugosci nie wiekszej niz 50 m" (par. 12 ust. 4); "Droga pozarowa powinna
+  zapewniac przejazd bez cofania lub powinna byc zakonczona placem manewrowym o
+  wymiarach 20 m x 20 m" (par. 12 ust. 9); "Najmniejszy promien zewnetrznego
+  luku drogi pozarowej nie moze wynosic mniej niz 11 m." (par. 12 ust. 11);
+  "Minimalna szerokosc drogi pozarowej powinna wynosic co najmniej 4 m, a jej
+  nachylenie podluzne nie moze przekraczac 5%" (par. 13 ust. 1); "wysokosc
+  przejazdu nie mniejsza niz 4,2 m [...]; szerokosc przejazdu nie mniejsza niz
+  3,6 m, w tym szerokosc jezdni co najmniej 3 m" (par. 14 ust. 1)
+verification: isap_primary
+severity: hard
+# The geometric checks below apply when a fire road is REQUIRED for the
+# building; multifamily (ZL IV) needs one when sredniowysoki+ (>12 m).
+applies_when:
+  fire_road_required: true
+inputs:
+  - fire_road_required        # bool — wymagalnosc wg par. 12 ust. 1 (patrz notes; trigger liczy caller)
+  - road_width_m              # number — par. 13 ust. 1
+  - road_edge_distance_m      # number — odleglosc krawedzi drogi od sciany (par. 12 ust. 2)
+  - runs_along_longer_side    # bool — par. 12 ust. 2
+  - shorter_side_over_60m     # bool — par. 12 ust. 2 (dwustronnie)
+  - road_on_both_sides        # bool — par. 12 ust. 2
+  - outer_curve_radius_m      # number — par. 12 ust. 11
+  - dojscie_length_m          # number — par. 12 ust. 4
+  - dojscie_width_m           # number — par. 12 ust. 4
+  - dead_end                  # bool — par. 12 ust. 9
+  - plac_manewrowy_width_m    # number — par. 12 ust. 9
+  - plac_manewrowy_length_m   # number — par. 12 ust. 9
+  - przejazd_present          # bool — par. 14 (przejazd na dziedziniec)
+  - przejazd_height_m         # number — par. 14 ust. 1 pkt 1
+  - przejazd_width_m          # number — par. 14 ust. 1 pkt 2
+outputs:
+  - fire_road_compliant
+  - applicability
+  - confidence
+logic: declarative_checks_v1
+input_defaults:
+  shorter_side_over_60m: false
+  dead_end: false
+  przejazd_present: false
+thresholds:
+  trigger_height_m: 12.0        # budynek sredniowysoki: >12 m (WT par. 8) — dla ZL III/IV/V
+  min_road_width_m: 4.0         # par. 13 ust. 1
+  max_longitudinal_slope_pct: 5.0  # par. 13 ust. 1
+  edge_distance_min_m: 5.0      # par. 12 ust. 2 (obiekty ZL)
+  edge_distance_max_m: 15.0     # par. 12 ust. 2 (obiekty ZL; pozostale 5-25 m)
+  min_outer_curve_radius_m: 11.0  # par. 12 ust. 11
+  max_dojscie_length_m: 50.0    # par. 12 ust. 4
+  min_dojscie_width_m: 1.5      # par. 12 ust. 4
+  plac_manewrowy_min_m: 20.0    # par. 12 ust. 9 (20 m x 20 m)
+  min_przejazd_height_m: 4.2    # par. 14 ust. 1 pkt 1 (jednorodzinne: 3,2 m)
+  min_przejazd_width_m: 3.6     # par. 14 ust. 1 pkt 2 (jezdnia >=3 m)
+  axle_load_pm_kn: 100.0        # par. 13 ust. 2 — obiekty PM (par. 12 ust. 1 pkt 3-4)
+  axle_load_other_kn: 50.0      # par. 13 ust. 3 — pozostale tereny
+checks:
+  - name: szerokosc-drogi
+    source_reference: "par. 13 ust. 1"
+    input: road_width_m
+    op: gte
+    threshold: min_road_width_m
+  - name: krawedz-drogi-min-5m
+    source_reference: "par. 12 ust. 2"
+    input: road_edge_distance_m
+    op: gte
+    threshold: edge_distance_min_m
+  - name: krawedz-drogi-max-15m
+    source_reference: "par. 12 ust. 2"
+    input: road_edge_distance_m
+    op: lte
+    threshold: edge_distance_max_m
+  - name: wzdluz-dluzszego-boku
+    source_reference: "par. 12 ust. 2"
+    input: runs_along_longer_side
+    op: eq
+    value: true
+  - name: dwustronnie-przy-boku-pow-60m
+    source_reference: "par. 12 ust. 2"
+    applies_when: {shorter_side_over_60m: true}
+    input: road_on_both_sides
+    op: eq
+    value: true
+  - name: promien-luku-zewnetrznego
+    source_reference: "par. 12 ust. 11"
+    input: outer_curve_radius_m
+    op: gte
+    threshold: min_outer_curve_radius_m
+  - name: dojscie-dlugosc
+    source_reference: "par. 12 ust. 4"
+    input: dojscie_length_m
+    op: lte
+    threshold: max_dojscie_length_m
+  - name: dojscie-szerokosc
+    source_reference: "par. 12 ust. 4"
+    input: dojscie_width_m
+    op: gte
+    threshold: min_dojscie_width_m
+  - name: plac-manewrowy-szerokosc
+    source_reference: "par. 12 ust. 9"
+    applies_when: {dead_end: true}
+    input: plac_manewrowy_width_m
+    op: gte
+    threshold: plac_manewrowy_min_m
+  - name: plac-manewrowy-dlugosc
+    source_reference: "par. 12 ust. 9"
+    applies_when: {dead_end: true}
+    input: plac_manewrowy_length_m
+    op: gte
+    threshold: plac_manewrowy_min_m
+  - name: przejazd-wysokosc
+    source_reference: "par. 14 ust. 1 pkt 1"
+    applies_when: {przejazd_present: true}
+    input: przejazd_height_m
+    op: gte
+    threshold: min_przejazd_height_m
+  - name: przejazd-szerokosc
+    source_reference: "par. 14 ust. 1 pkt 2"
+    applies_when: {przejazd_present: true}
+    input: przejazd_width_m
+    op: gte
+    threshold: min_przejazd_width_m
+notes: >-
+  Wymagalnosc (par. 12 ust. 1, liczy caller -> fire_road_required): ZL I/II
+  zawsze; ZL III/IV/V w budynku sredniowysokim+ (>12 m; wielorodzinny = ZL IV);
+  PM wg Q>500 MJ/m2 z powierzchnia >1000 m2 lub zagrozeniem wybuchem; PM
+  Q<500 o pow. >20000 m2; budynek niski ZL III >1000 m2 (kondygnacja powyzej
+  pierwszej) lub ZL V >50 miejsc noclegowych. Odleglosc krawedzi 5-15 m dotyczy
+  obiektow ZL (pozostale 5-25 m — thresholds edge_distance_max dla ZL). Nacisk
+  osi: 100 kN dla obiektow PM (par. 13 ust. 2), co najmniej 50 kN na pozostalych
+  terenach (par. 13 ust. 3). Wyjatki par. 12 ust. 3 (30%/50% obwodu, pierzeja),
+  ust. 6-7 (okna dla ekip ratowniczych; budynki do 3 kondygnacji i <=12 m z
+  dojsciem <=30 m) oraz ust. 10 (odcinek <=15 m z cofaniem) obsluguje walidator
+  Phase 10. Brak drogi pozarowej tam, gdzie wymagana -> caller podaje
+  road_width_m = 0 (fail) lub pomija dane (unknown/blocker).

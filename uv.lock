@@ -1479,6 +1479,7 @@ dependencies = [
     { name = "plot-domain" },
     { name = "plot-envelope" },
     { name = "plot-geo" },
+    { name = "plot-planning" },
     { name = "plot-reports" },
     { name = "plot-rules" },
     { name = "plot-shared" },
@@ -1492,6 +1493,7 @@ requires-dist = [
     { name = "plot-domain", editable = "packages/domain" },
     { name = "plot-envelope", editable = "packages/envelope" },
     { name = "plot-geo", editable = "packages/geo" },
+    { name = "plot-planning", editable = "packages/planning" },
     { name = "plot-reports", editable = "packages/reports" },
     { name = "plot-rules", editable = "packages/rules" },
     { name = "plot-shared", editable = "packages/shared" },
@@ -1528,6 +1530,7 @@ dev = [
     { name = "pytest" },
     { name = "respx" },
     { name = "ruff" },
+    { name = "types-jsonschema" },
     { name = "types-pyyaml" },
 ]
 
@@ -1557,6 +1560,7 @@ dev = [
     { name = "pytest", specifier = ">=8" },
     { name = "respx", specifier = ">=0.21" },
     { name = "ruff", specifier = ">=0.6" },
+    { name = "types-jsonschema", specifier = ">=4.21" },
     { name = "types-pyyaml", specifier = ">=6.0" },
 ]
 
@@ -1679,6 +1683,7 @@ source = { editable = "apps/mcp-server" }
 dependencies = [
     { name = "mcp", extra = ["cli"] },
     { name = "plot-domain" },
+    { name = "plot-planning" },
     { name = "plot-reports" },
     { name = "plot-rules" },
     { name = "plot-shared" },
@@ -1692,6 +1697,7 @@ dependencies = [
 requires-dist = [
     { name = "mcp", extras = ["cli"], specifier = ">=1.2" },
     { name = "plot-domain", editable = "packages/domain" },
+    { name = "plot-planning", editable = "packages/planning" },
     { name = "plot-reports", editable = "packages/reports" },
     { name = "plot-rules", editable = "packages/rules" },
     { name = "plot-shared", editable = "packages/shared" },
@@ -1703,8 +1709,22 @@ requires-dist = [
 
 [[package]]
 name = "plot-planning"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/planning" }
+dependencies = [
+    { name = "jsonschema" },
+    { name = "plot-domain" },
+    { name = "pydantic" },
+    { name = "shapely" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "jsonschema", specifier = ">=4.21" },
+    { name = "plot-domain", editable = "packages/domain" },
+    { name = "pydantic", specifier = ">=2" },
+    { name = "shapely", specifier = ">=2.0" },
+]
 
 [[package]]
 name = "plot-reports"
@@ -1742,11 +1762,19 @@ name = "plot-rules"
 version = "0.1.0"
 source = { editable = "packages/rules" }
 dependencies = [
+    { name = "jsonschema" },
+    { name = "plot-domain" },
+    { name = "pydantic" },
     { name = "pyyaml" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pyyaml", specifier = ">=6.0" }]
+requires-dist = [
+    { name = "jsonschema", specifier = ">=4.21" },
+    { name = "plot-domain", editable = "packages/domain" },
+    { name = "pydantic", specifier = ">=2" },
+    { name = "pyyaml", specifier = ">=6.0" },
+]
 
 [[package]]
 name = "plot-security"
@@ -2650,6 +2678,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/f4/8a/8dc5733b8939e7f1a71173091a6e27a1658345edbff548a0bf3f5bb26173/typer-0.26.6.tar.gz", hash = "sha256:cdbc160fe7e795b835fb6016419494a521a67bfb86b9476a1ccd0e7727d3ae5b", size = 201595, upload-time = "2026-06-02T13:47:50.536Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/30/c7/519138260db5e2fe03a509bf9e8ef6af9a514d3565c8fa74fc4fededbae1/typer-0.26.6-py3-none-any.whl", hash = "sha256:49f96d9ee5730cef607bbe155042f40b41fa4c0d0dec04990d580837493805be", size = 122464, upload-time = "2026-06-02T13:47:51.768Z" },
+]
+
+[[package]]
+name = "types-jsonschema"
+version = "4.26.0.20260518"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "referencing" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/dd/46/73b6a5d61a61015c4248030a8cb07e5bdddb4041430fae9e585a68692578/types_jsonschema-4.26.0.20260518.tar.gz", hash = "sha256:e1dd53dc97a64f5eccdd6fa9839666e09bb500a8ebba2db6fdaf1789faea81a6", size = 16638, upload-time = "2026-05-18T06:06:44.106Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/07/d5/134f8a147dcecda10db7f60cfc6af0578a25a5c53c87b3907a64385e0184/types_jsonschema-4.26.0.20260518-py3-none-any.whl", hash = "sha256:30b30a518c7fe335df85c919fcbcc631b69c03d4a4b5b632fa916bea03065307", size = 16072, upload-time = "2026-05-18T06:06:43.264Z" },
 ]
 
 [[package]]

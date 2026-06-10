@@ -1,0 +1,37 @@
+UCHWAŁA NR XLII/123/21
+RADY MIASTA TESTOWO
+z dnia 25 marca 2021 r.
+
+w sprawie miejscowego planu zagospodarowania przestrzennego rejonu ulicy Testowej
+(fragment golden-fixture do testów parsera — tekst syntetyczny wzorowany na układzie uchwał MPZP)
+
+Rozdział 2
+Ustalenia szczegółowe
+
+§ 7. Dla terenu oznaczonego na rysunku planu symbolem 1MW ustala się:
+
+1) przeznaczenie podstawowe: zabudowa mieszkaniowa wielorodzinna;
+2) przeznaczenie dopuszczalne: usługi nieuciążliwe w parterach budynków
+   od strony ulicy Testowej;
+3) zakaz lokalizacji obiektów produkcyjnych, składów i magazynów;
+4) teren położony jest w strefie zabudowy śródmiejskiej w rozumieniu
+   przepisów odrębnych;
+5) zasady kształtowania zabudowy oraz wskaźniki zagospodarowania terenu:
+   a) intensywność zabudowy: minimalna 0,5, maksymalna 1,2;
+   b) maksymalna wysokość zabudowy: 16 m, jednak nie więcej niż 5 kondygnacji
+      nadziemnych;
+   c) maksymalna powierzchnia zabudowy: 40% powierzchni działki budowlanej;
+   d) minimalny udział powierzchni biologicznie czynnej: 25% powierzchni
+      działki budowlanej;
+6) geometria dachów: dachy płaskie lub dwuspadowe o kącie nachylenia do 35 stopni;
+7) nieprzekraczalne linie zabudowy zgodnie z rysunkiem planu;
+8) zasady obsługi parkingowej:
+   a) ustala się wskaźnik 1,2 miejsca postojowego na 1 mieszkanie,
+   b) dla usług: 3 miejsca postojowe na każde 100 m2 powierzchni użytkowej usług,
+   c) miejsca postojowe należy realizować w granicach działki budowlanej.
+
+§ 8. Dla terenu oznaczonego symbolem 2U ustala się przeznaczenie podstawowe:
+usługi; szczegółowe wskaźniki zagospodarowania według rysunku planu.
+
+§ 9. W zakresie ochrony środowiska ustala się obowiązek zachowania
+istniejącego szpaleru drzew wzdłuż ulicy Testowej.

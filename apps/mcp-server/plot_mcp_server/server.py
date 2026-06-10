@@ -192,10 +192,22 @@ def planning_fetch(
 def planning_parse_document(
     file_id: Annotated[str | None, Field(description="Uploaded file id.")] = None,
     text: Annotated[str | None, Field(description="Raw document text (untrusted content).")] = None,
+    candidates: Annotated[
+        list[dict[str, Any]] | None,
+        Field(
+            description=(
+                "Optional candidate-validation mode (Phase 8, §29): the calling model's "
+                "own LLM extraction as structured JSON (schemas/planning-indicators."
+                "schema.json). Each candidate is schema-validated AND its source_fragment "
+                "must occur verbatim in the document — otherwise rejected (F-0550). "
+                "Omit for deterministic server-side extraction."
+            )
+        ),
+    ] = None,
     *,
     ctx: Context[ServerSession, AppContext],
 ) -> dict[str, Any]:
-    return _app(ctx).usecases.planning_parse_document(file_id, text)
+    return _app(ctx).usecases.planning_parse_document(file_id, text, candidates)
 
 
 @mcp.tool(annotations=_READ_ONLY, description="Compute constraints and buildable envelope.")
@@ -317,14 +329,26 @@ def monitoring_create(
 @mcp.tool(annotations=_WRITE_DESTRUCTIVE, description="Apply expert override with audit trail.")
 def manual_override(
     analysis_id: Annotated[str, Field(description="Analysis run id.")],
-    target_type: Annotated[str, Field(description="Entity type being overridden.")],
-    target_id: Annotated[str, Field(description="Identifier of the overridden entity.")],
+    target_type: Annotated[str, Field(description="Entity type being overridden (e.g. 'rule').")],
+    target_id: Annotated[str, Field(description="Identifier of the overridden entity (e.g. rule id).")],
     reason: Annotated[str, Field(description="Reason for the override (audit, NFR-AUD-003).")],
     user_id: Annotated[str, Field(description="Author of the override (audit, NFR-AUD-003).")],
+    after: Annotated[
+        dict[str, Any] | None,
+        Field(
+            description=(
+                "Explicit new value applied at the rule-evaluation layer, e.g. "
+                "{'status': 'pass', 'confidence': 0.95}. REQUIRED — nothing is "
+                "defaulted (Phase 8, F-0137)."
+            )
+        ),
+    ] = None,
     *,
     ctx: Context[ServerSession, AppContext],
 ) -> dict[str, Any]:
-    return _app(ctx).usecases.manual_override(analysis_id, target_type, target_id, reason, user_id)
+    return _app(ctx).usecases.manual_override(
+        analysis_id, target_type, target_id, reason, user_id, after
+    )
 
 
 # --- Dedicated inline map-preview / verify tool (Phase 3 §3.1.3, NFR-PERF-009) --- #
@@ -412,6 +436,7 @@ def diagnostics_run(
         dev_hot_reload=app.settings.dev_hot_reload,
         last_reload_at=app.last_reload_at.isoformat() if app.last_reload_at else None,
         server_version=app.server_version,
+        ruleset_errors=list(app.ruleset_registry.errors),
     )
 
 
@@ -584,12 +609,50 @@ def resource_map_preview(analysis_id: str) -> bytes:
 
 @mcp.resource("planning://{municipality_id}/acts", mime_type="application/json")
 def resource_planning_acts(municipality_id: str) -> str:
-    return json.dumps({"municipality_id": municipality_id, "acts": [], "status": "not_yet_computed"})
+    # Phase 8: planning acts from the parsed-APP/GML store (fixtures/ingest).
+    from plot_planning import DEFAULT_PLANNING_STORE, stability_score
+
+    acts = DEFAULT_PLANNING_STORE.acts_for(municipality_id)
+    if not acts:
+        return json.dumps(
+            {
+                "municipality_id": municipality_id,
+                "acts": [],
+                "status": "no_planning_data",
+                "note": "Brak zaimportowanych aktów — to nie oznacza braku planu (§21).",
+            }
+        )
+    return json.dumps(
+        {
+            "municipality_id": municipality_id,
+            "acts": [
+                {**a.model_dump(mode="json"), "stability": stability_score(a)} for a in acts
+            ],
+            "status": "ok",
+        }
+    )
 
 
 @mcp.resource("planning://{municipality_id}/act/{act_id}", mime_type="application/json")
 def resource_planning_act(municipality_id: str, act_id: str) -> str:
-    return json.dumps({"municipality_id": municipality_id, "act_id": act_id, "status": "not_yet_computed"})
+    # Phase 8: one act + its zones (geometry included — fetched on demand,
+    # never inlined into tool results; NFR-PERF-009).
+    from plot_planning import DEFAULT_PLANNING_STORE
+
+    act = DEFAULT_PLANNING_STORE.act(municipality_id, act_id)
+    if act is None:
+        return json.dumps(
+            {"municipality_id": municipality_id, "act_id": act_id, "status": "not_found"}
+        )
+    zones = DEFAULT_PLANNING_STORE.zones_for_act(act_id)
+    return json.dumps(
+        {
+            "municipality_id": municipality_id,
+            "act": act.model_dump(mode="json"),
+            "zones": [z.model_dump(mode="json") for z in zones],
+            "status": "ok",
+        }
+    )
 
 
 @mcp.resource("ruleset://PL/{ruleset_version}", mime_type="application/json")

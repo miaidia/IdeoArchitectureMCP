@@ -1,9 +1,27 @@
-# plot-planning — workspace member. Stub package (no runtime code yet); deferred to a later phase.
+# plot-planning — planning intelligence (Phase 8): APP/GML pipeline, MPZP document
+# parser (deterministic extractors + LLM-candidate validation), use matrix,
+# source-conflict detection and planning-stability heuristic.
+#
+# Decoupling rule (Phase 1.4 / §9.4): plot_planning must NOT import plot_connectors
+# (fetching is orchestrated above, in plot_agent / the MCP use-case layer) and must
+# NOT carry legal threshold values (those live in rulesets/, read via plot_rules).
 [project]
 name = "plot-planning"
-version = "0.1.0"
+version = "0.2.0"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    # Zone/parcel intersection + coverage % (F-0110) in EPSG:2180.
+    "shapely>=2.0",
+    # Typed indicator/conflict/coverage records + JSON Schema export.
+    "pydantic>=2",
+    # Candidate validation against schemas/planning-indicators.schema.json (§29).
+    "jsonschema>=4.21",
+    # PlanningAct / PlanningZone / PlanningIndicator / UnknownItem / EvidenceItem.
+    "plot-domain",
+]
+
+[tool.uv.sources]
+plot-domain = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

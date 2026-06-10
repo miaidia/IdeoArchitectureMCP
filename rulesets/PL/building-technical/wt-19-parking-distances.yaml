@@ -1,0 +1,99 @@
+# WT §19 — odległości stanowisk postojowych od okien i granicy działki (Phase 8).
+# Literal wording verified against the PRIMARY consolidated text (Dz.U. 2022 poz.
+# 1225) via the ISAP/ELI API on 2026-06-10. §19 unchanged by 2023/2442; §20
+# (stanowiska dla niepełnosprawnych przy oknach, limit 6%) zmieniony przez 2442.
+id: PL-WT-19-PARKING-DISTANCES-001
+title: Odleglosci stanowisk postojowych od okien, placow zabaw i granicy dzialki (WT par. 19)
+jurisdiction: PL
+valid_from: 2022-06-09
+valid_to: null
+source_reference: >-
+  Dz.U. 2022 poz. 1225 par. 19 ust. 1-2 (tekst jednolity WT); par. 20 w brzmieniu
+  Dz.U. 2023 poz. 2442 (limit 6%, w mocy od 2024-08-01)
+source_quote: >-
+  "Odleglosc stanowisk postojowych [...] od: placu zabaw dla dzieci, boiska dla
+  dzieci i mlodziezy, okien pomieszczen przeznaczonych na staly pobyt ludzi [...]
+  nie moze byc mniejsza niz: 1) dla samochodow osobowych: a) 7 m - w przypadku
+  parkingu do 10 stanowisk postojowych wlacznie, b) 10 m - w przypadku parkingu
+  od 11 do 60 stanowisk postojowych wlacznie, c) 20 m - w przypadku parkingu
+  powyzej 60 stanowisk postojowych" (ust. 1); "nalezy sytuowac [...] w
+  odleglosci od granicy tej dzialki nie mniejszej niz: 1) dla samochodow
+  osobowych: a) 3 m [...do 10...], b) 6 m [...od 11 do 60...], c) 16 m
+  [...powyzej 60...]" (ust. 2); par. 20 (zm. 2442): "Stanowiska postojowe dla
+  samochodow osobowych, z ktorych korzystaja wylacznie osoby niepelnosprawne, w
+  liczbie nie wiekszej niz 6% ogolnej liczby stanowisk postojowych [...] jednak
+  nie mniejszej niz 1, moga byc zblizone bez ograniczen do okien budynkow."
+verification: isap_primary
+severity: hard
+inputs:
+  - parking_spaces              # number — liczba stanowisk parkingu (decyduje o widelkach)
+  - vehicle_type                # "osobowy" | "inny" (samochody inne niz osobowe)
+  - distance_to_windows_m       # number — do okien pomieszczen na staly pobyt ludzi / placow zabaw / boisk
+  - distance_to_boundary_m      # number — do granicy dzialki budowlanej
+outputs:
+  - required_window_distance_m
+  - required_boundary_distance_m
+  - applicability
+  - confidence
+logic: declarative_checks_v1
+input_defaults:
+  vehicle_type: osobowy
+thresholds:
+  disabled_spaces_max_share: 0.06   # par. 20 zm. 2442 (od 2024-08-01) — informacyjnie dla Phase 10
+select:
+  required_window_distance_m:        # ust. 1 pkt 1 (osobowe)
+    - when: {parking_spaces: {max: 10}}
+      value: 7.0
+    - when: {parking_spaces: {min: 11, max: 60}}
+      value: 10.0
+    - when: {parking_spaces: {min: 61}}
+      value: 20.0
+  required_window_distance_other_m:  # ust. 1 pkt 2 (inne niz osobowe)
+    - when: {parking_spaces: {max: 4}}
+      value: 10.0
+    - when: {parking_spaces: {min: 5}}
+      value: 20.0
+  required_boundary_distance_m:      # ust. 2 pkt 1 (osobowe)
+    - when: {parking_spaces: {max: 10}}
+      value: 3.0
+    - when: {parking_spaces: {min: 11, max: 60}}
+      value: 6.0
+    - when: {parking_spaces: {min: 61}}
+      value: 16.0
+  required_boundary_distance_other_m: # ust. 2 pkt 2 (inne niz osobowe)
+    - when: {parking_spaces: {max: 4}}
+      value: 6.0
+    - when: {parking_spaces: {min: 5}}
+      value: 16.0
+checks:
+  - name: odleglosc-od-okien-osobowe
+    source_reference: "par. 19 ust. 1 pkt 1"
+    applies_when: {vehicle_type: osobowy}
+    input: distance_to_windows_m
+    op: gte
+    select: required_window_distance_m
+  - name: odleglosc-od-granicy-osobowe
+    source_reference: "par. 19 ust. 2 pkt 1"
+    applies_when: {vehicle_type: osobowy}
+    input: distance_to_boundary_m
+    op: gte
+    select: required_boundary_distance_m
+  - name: odleglosc-od-okien-inne
+    source_reference: "par. 19 ust. 1 pkt 2"
+    applies_when: {vehicle_type: inny}
+    input: distance_to_windows_m
+    op: gte
+    select: required_window_distance_other_m
+  - name: odleglosc-od-granicy-inne
+    source_reference: "par. 19 ust. 2 pkt 2"
+    applies_when: {vehicle_type: inny}
+    input: distance_to_boundary_m
+    op: gte
+    select: required_boundary_distance_other_m
+notes: >-
+  Wyjatki (do obslugi w walidatorze Phase 10): ust. 3 — wjazdy do zamknietego
+  garazu wzgledem okien opieki zdrowotnej/oswiaty i placow zabaw; ust. 4 —
+  parkingi miedzy liniami rozgraniczajacymi ulice; ust. 5-6 — 1-2 stanowiska
+  przy budynku jednorodzinnym; ust. 7 — granica z dzialka drogowa. Stanowiska
+  dla osob niepelnosprawnych (par. 20, zm. Dz.U. 2023 poz. 2442): bez ograniczen
+  przy oknach, max 6% ogolu stanowisk, min 1 — prog disabled_spaces_max_share.

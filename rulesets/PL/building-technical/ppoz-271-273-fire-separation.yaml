@@ -1,0 +1,158 @@
+# WT §271-273 — odległości przeciwpożarowe między budynkami (Phase 8 ruleset corpus).
+# Literal wording verified against the PRIMARY consolidated text (Dz.U. 2022 poz.
+# 1225) via the ISAP/ELI API on 2026-06-10; unchanged by the 2023/2024 amendments.
+id: PL-PPOZ-271-273-FIRE-SEPARATION-001
+title: Odleglosci przeciwpozarowe miedzy zewnetrznymi scianami budynkow (WT par. 271-273)
+jurisdiction: PL
+valid_from: 2022-06-09
+valid_to: null
+source_reference: "Dz.U. 2022 poz. 1225 par. 271 ust. 1-7, par. 272 ust. 1-3, par. 273 ust. 1 (tekst jednolity WT)"
+source_quote: >-
+  "Odleglosc miedzy zewnetrznymi scianami budynkow niebedacymi scianami
+  oddzielenia przeciwpozarowego [...] nie powinna [...] byc mniejsza niz
+  odleglosc w metrach okreslona w ponizszej tabeli [ZL/IN/PM Q<=1000: 8 m;
+  PM 1000<Q<=4000: 15 m; PM Q>4000: 20 m]" (par. 271 ust. 1); "Jezeli jedna ze
+  scian zewnetrznych [...] lub przekrycie dachu jednego z budynkow jest
+  rozprzestrzeniajace ogien, wowczas odleglosc [...] nalezy zwiekszyc o 50%, a
+  jezeli dotyczy to obu scian zewnetrznych lub przekrycia dachu obu budynkow -
+  o 100%." (par. 271 ust. 2); "[sciana o klasie E na 30-65% powierzchni ->
+  +50%]" (ust. 4); "[<30% -> +100%]" (ust. 5); "[oba budynki ze stalymi
+  urzadzeniami gasniczymi wodnymi -> -50%]" (ust. 6); "[jeden budynek -> -25%]"
+  (ust. 7); "Odleglosc sciany zewnetrznej wznoszonego budynku od granicy
+  sasiedniej niezabudowanej dzialki budowlanej powinna wynosic co najmniej
+  polowe odleglosci okreslonej w par. 271 ust. 1-7 [...] a w przypadku braku
+  takiego planu - budynek ZL ze sciana zewnetrzna, o ktorej mowa w par. 271
+  ust. 1." (par. 272 ust. 1); "Odleglosci miedzy scianami zewnetrznymi budynkow
+  polozonych na jednej dzialce budowlanej nie ustala sie [...] jezeli laczna
+  powierzchnia wewnetrzna tych budynkow nie przekracza najmniejszej
+  dopuszczalnej powierzchni strefy pozarowej [...]" (par. 273 ust. 1)
+verification: isap_primary
+severity: hard
+inputs:
+  - separation_distance_m         # number — odleglosc miedzy scianami zewnetrznymi budynkow
+  - max_q_mj_m2                   # number — wieksza z gestosci obciazenia ogniowego pary budynkow (ZL/IN -> 0)
+  - wall_or_roof_fire_spreading_one   # bool — par. 271 ust. 2 (+50%)
+  - wall_or_roof_fire_spreading_both  # bool — par. 271 ust. 2 (+100%)
+  - wall_low_fire_rating_30_65    # bool — par. 271 ust. 4 (klasa E na 30-65% powierzchni, +50%)
+  - wall_low_fire_rating_below_30 # bool — par. 271 ust. 5 (<30%, +100%)
+  - sprinklers_both               # bool — par. 271 ust. 6 (-50%)
+  - sprinklers_one                # bool — par. 271 ust. 7 (-25%)
+  - explosion_risk                # bool — par. 271 ust. 3 (>=20 m)
+  - distance_to_unbuilt_boundary_m # number — par. 272 ust. 1
+  - neighbor_assumed_q_mj_m2      # number — zalozenie dla dzialki niezabudowanej (MPZP; brak planu -> ZL: 0)
+  - same_plot_within_fire_zone_limit # bool — par. 273 ust. 1 (budynki na jednej dzialce)
+outputs:
+  - required_fire_separation_m
+  - applicability
+  - confidence
+logic: declarative_checks_v1
+# Documented assumptions when flags are absent (recorded in trace): walls/roofs
+# NRO (nierozprzestrzeniajace ognia), no low fire-rating fraction, no sprinkler
+# credit (conservative: reductions are NOT assumed), no explosion risk.
+input_defaults:
+  wall_or_roof_fire_spreading_one: false
+  wall_or_roof_fire_spreading_both: false
+  wall_low_fire_rating_30_65: false
+  wall_low_fire_rating_below_30: false
+  sprinklers_both: false
+  sprinklers_one: false
+  explosion_risk: false
+  same_plot_within_fire_zone_limit: false
+thresholds:
+  explosion_min_distance_m: 20.0   # par. 271 ust. 3
+select:
+  # par. 271 ust. 1 table collapsed over max(Q) of the pair; ZL and IN rows/
+  # columns are equivalent to PM Q<=1000 (all -> 8 m), so callers pass
+  # max_q_mj_m2 = 0 for pure ZL/IN pairs.
+  required_separation_m:
+    - when: {max_q_mj_m2: {max: 1000.0}}
+      value: 8.0
+    - when: {max_q_mj_m2: {min: 1000.0, max: 4000.0}}
+      value: 15.0
+    - when: {max_q_mj_m2: {min: 4000.0}}
+      value: 20.0
+  # par. 272 ust. 1: half of the par. 271 distance towards an unbuilt neighbor
+  # parcel (assumption for the neighbor per MPZP; no plan -> ZL -> 4 m).
+  required_boundary_separation_m:
+    - when: {neighbor_assumed_q_mj_m2: {max: 1000.0}}
+      value: 4.0
+    - when: {neighbor_assumed_q_mj_m2: {min: 1000.0, max: 4000.0}}
+      value: 7.5
+    - when: {neighbor_assumed_q_mj_m2: {min: 4000.0}}
+      value: 10.0
+checks:
+  # par. 273 ust. 1: budynki na jednej dzialce w ramach limitu strefy pozarowej
+  # — odleglosci nie ustala sie (zwolnienie; weryfikacje limitu robi caller).
+  - name: jedna-dzialka-w-limicie-strefy
+    source_reference: "par. 273 ust. 1"
+    applies_when: {same_plot_within_fire_zone_limit: true}
+    op: exempt
+  - name: odleglosc-miedzy-budynkami
+    source_reference: "par. 271 ust. 1-7"
+    applies_when: {same_plot_within_fire_zone_limit: false, explosion_risk: false}
+    input: separation_distance_m
+    op: gte
+    select: required_separation_m
+    modifiers:
+      - when: {wall_or_roof_fire_spreading_one: true}
+        multiply: 1.5
+        note: "par. 271 ust. 2 — jedna sciana/dach rozprzestrzeniajace ogien: +50%"
+      - when: {wall_or_roof_fire_spreading_both: true}
+        multiply: 2.0
+        note: "par. 271 ust. 2 — obie sciany/dachy: +100% (zamiast +50%)"
+      - when: {wall_low_fire_rating_30_65: true}
+        multiply: 1.5
+        note: "par. 271 ust. 4 — klasa E na 30-65% powierzchni sciany: +50%"
+      - when: {wall_low_fire_rating_below_30: true}
+        multiply: 2.0
+        note: "par. 271 ust. 5 — klasa E na <30% powierzchni sciany: +100%"
+      - when: {sprinklers_both: true}
+        multiply: 0.5
+        note: "par. 271 ust. 6 — stale urzadzenia gasnicze wodne w obu budynkach: -50%"
+      - when: {sprinklers_one: true}
+        multiply: 0.75
+        note: "par. 271 ust. 7 — stale urzadzenia gasnicze wodne w jednym budynku: -25%"
+  - name: pomieszczenie-zagrozone-wybuchem
+    source_reference: "par. 271 ust. 3"
+    applies_when: {explosion_risk: true}
+    input: separation_distance_m
+    op: gte
+    threshold: explosion_min_distance_m
+  # par. 272 ust. 1 odsyla do odleglosci "okreslonej w par. 271 ust. 1-7" —
+  # polowa odleglosci PO modyfikatorach ust. 2-7. Tabela select trzyma juz
+  # polowy wartosci bazowych (4/7.5/10); mnozenie jest przemienne, wiec
+  # zastosowanie tych samych modyfikatorow na polowie daje dokladnie
+  # (baza x modyfikatory) / 2.
+  - name: odleglosc-od-granicy-niezabudowanej
+    source_reference: "par. 272 ust. 1 (w zw. z par. 271 ust. 1-7)"
+    input: distance_to_unbuilt_boundary_m
+    op: gte
+    select: required_boundary_separation_m
+    modifiers:
+      - when: {wall_or_roof_fire_spreading_one: true}
+        multiply: 1.5
+        note: "par. 271 ust. 2 — jedna sciana/dach rozprzestrzeniajace ogien: +50%"
+      - when: {wall_or_roof_fire_spreading_both: true}
+        multiply: 2.0
+        note: "par. 271 ust. 2 — obie sciany/dachy: +100% (zamiast +50%)"
+      - when: {wall_low_fire_rating_30_65: true}
+        multiply: 1.5
+        note: "par. 271 ust. 4 — klasa E na 30-65% powierzchni sciany: +50%"
+      - when: {wall_low_fire_rating_below_30: true}
+        multiply: 2.0
+        note: "par. 271 ust. 5 — klasa E na <30% powierzchni sciany: +100%"
+      - when: {sprinklers_both: true}
+        multiply: 0.5
+        note: "par. 271 ust. 6 — stale urzadzenia gasnicze wodne w obu budynkach: -50%"
+      - when: {sprinklers_one: true}
+        multiply: 0.75
+        note: "par. 271 ust. 7 — stale urzadzenia gasnicze wodne w jednym budynku: -25%"
+notes: >-
+  Kategorie: budynki mieszkalne wielorodzinne = ZL IV; garaze/techniczne = PM
+  wedlug Q (config walidatora Phase 10, nie tej reguly). Modyfikatory ust. 2 i
+  4-5 wykluczaja sie parami (one/both) — caller ustawia dokladnie jeden wariant;
+  silnik mnozy kolejno wszystkie pasujace (ust. 4-5 "w stosunku do okreslonej w
+  ust. 1 i 2", ust. 6-7 "w stosunku do okreslonej w ust. 1-5"). Par. 272 ust. 2:
+  budynki jednorodzinne/zagrodowe NRO — odleglosc od granicy wg par. 12. Par.
+  272 ust. 3: budynek przy samej granicy wymaga sciany oddzielenia ppoz. Par.
+  271 ust. 8-13 (granica lasu, pasy terenu, kat scian) — walidator Phase 10.

@@ -19,6 +19,8 @@ dependencies = [
     "plot-rules",
     # Phase 3: deterministic map render + artifact store for the image-content path.
     "plot-reports",
+    # Phase 8: planning store / parser behind planning_fetch + planning:// resources.
+    "plot-planning",
 ]
 
 [tool.uv.sources]
@@ -26,6 +28,7 @@ plot-shared = { workspace = true }
 plot-domain = { workspace = true }
 plot-rules = { workspace = true }
 plot-reports = { workspace = true }
+plot-planning = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

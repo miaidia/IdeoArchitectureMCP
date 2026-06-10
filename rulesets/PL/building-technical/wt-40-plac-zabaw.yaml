@@ -1,0 +1,129 @@
+# WT §40 — place zabaw dla dzieci i miejsca rekreacyjne (Phase 8 ruleset corpus).
+# Literal wording verified against the PRIMARY amendment text (Dz.U. 2023 poz.
+# 2442, §1 pkt 4) via the ISAP/ELI API on 2026-06-10.
+id: PL-WT-40-PLAC-ZABAW-001
+title: Plac zabaw dla dzieci przy zabudowie wielorodzinnej (WT par. 40)
+jurisdiction: PL
+# §40 w brzmieniu Dz.U. 2023 poz. 2442, w mocy od 2024-08-01 (Dz.U. 2024 poz. 474).
+valid_from: 2024-08-01
+valid_to: null
+source_reference: >-
+  Dz.U. 2022 poz. 1225 par. 40 w brzmieniu Dz.U. 2023 poz. 2442 (w mocy od
+  2024-08-01 na mocy Dz.U. 2024 poz. 474)
+source_quote: >-
+  "Plac zabaw dla dzieci [...] wykonuje sie w przypadku budowy jednego budynku
+  mieszkalnego wielorodzinnego, w ktorym liczba mieszkan przekracza 20, a takze
+  w przypadku budowy zespolu budynkow mieszkalnych wielorodzinnych, w ktorym
+  liczba mieszkan przekracza 20, przy czym co najmniej 30% powierzchni placu
+  zabaw dla dzieci znajduje sie na terenie biologicznie czynnym." (ust. 1);
+  "Naslonecznienie co najmniej 50% powierzchni placu zabaw dla dzieci wynosi co
+  najmniej 2 godziny, liczone w dniach rownonocy, w godzinach 10.00-16.00. W
+  zabudowie srodmiejskiej dopuszcza sie naslonecznienie nie krotsze niz 1
+  godzina." (ust. 3); "Odleglosc placow zabaw dla dzieci, boisk dla dzieci i
+  mlodziezy oraz miejsc rekreacyjnych od linii rozgraniczajacych ulice, drog,
+  ciagow pieszo-jezdnych, okien pomieszczen przeznaczonych na pobyt ludzi oraz
+  miejsc gromadzenia odpadow wynosi co najmniej 10 m" (ust. 4); "Powierzchnia
+  placu zabaw dla dzieci wynosi co najmniej: 1) 1 m2 na kazde mieszkanie - od
+  21 do 50 mieszkan; 2) 50 m2 - od 51 do 100 mieszkan; 3) 0,5 m2 na kazde
+  mieszkanie - od 101 do 300 mieszkan; 4) 200 m2 - powyzej 300 mieszkan."
+  (ust. 8); "Dopuszcza sie podzial placu zabaw dla dzieci na czesci, przy czym
+  minimalna powierzchnia kazdej z nich wynosi 50 m2." (ust. 9)
+verification: isap_primary
+severity: hard
+applies_when:
+  is_multifamily: true   # budynek lub zespol budynkow mieszkalnych wielorodzinnych
+inputs:
+  - is_multifamily                     # bool — ust. 1
+  - total_mieszkania                   # number — liczba mieszkan w budynku/zespole
+  - playground_area_m2                 # number — projektowana powierzchnia placu zabaw
+  - playground_split                   # bool — czy plac podzielony na czesci (ust. 9)
+  - smallest_part_area_m2              # number — najmniejsza czesc placu (ust. 9)
+  - playground_pbc_share               # number 0-1 — udzial placu na PBC (ust. 1)
+  - playground_insolation_hours_equinox # number — naslonecznienie >=50% powierzchni (ust. 3)
+  - playground_min_distance_m          # number — min odleglosc od ulicy/okien/odpadow (ust. 4)
+  - zabudowa_srodmiejska               # bool — ust. 3/14/15
+outputs:
+  - required_playground_area_m2
+  - applicability
+  - confidence
+logic: declarative_checks_v1
+# Conservative assumptions: plac niepodzielony, poza zabudowa srodmiejska.
+input_defaults:
+  playground_split: false
+  zabudowa_srodmiejska: false
+thresholds:
+  trigger_mieszkania: 20.0          # ust. 1 — "liczba mieszkan przekracza 20"
+  min_part_area_m2: 50.0            # ust. 9
+  min_pbc_share: 0.30               # ust. 1 — >=30% powierzchni placu na PBC
+  min_insolation_hours: 2.0         # ust. 3 — rownonoc, 10:00-16:00
+  srodmiejska_min_insolation_hours: 1.0  # ust. 3 zd. 2
+  insolation_window_start_h: 10.0
+  insolation_window_end_h: 16.0
+  insolation_area_share: 0.50       # ust. 3 — co najmniej 50% powierzchni placu
+  min_distance_m: 10.0              # ust. 4
+  srodmiejska_area_floor_m2: 20.0   # ust. 14 pkt 2 / ust. 15 pkt 2 — min 20 m2
+select:
+  # ust. 1 + ust. 8: <=20 mieszkan -> brak obowiazku (0 m2); widelki powierzchni.
+  required_playground_area_m2:
+    - when: {total_mieszkania: {max: 20}}
+      value: 0.0
+    - when: {total_mieszkania: {min: 21, max: 50}}
+      value_per_unit: 1.0          # 1 m2 na kazde mieszkanie
+    - when: {total_mieszkania: {min: 51, max: 100}}
+      value: 50.0
+    - when: {total_mieszkania: {min: 101, max: 300}}
+      value_per_unit: 0.5          # 0,5 m2 na kazde mieszkanie
+    - when: {total_mieszkania: {min: 301}}
+      value: 200.0
+checks:
+  - name: powierzchnia-placu-zabaw
+    source_reference: "par. 40 ust. 1, 8, 14-15"
+    input: playground_area_m2
+    op: gte
+    select: required_playground_area_m2
+    modifiers:
+      # Gated on total_mieszkania >= 21: ust. 14/15 only MODIFY an obligation
+      # created by ust. 1/8 (liczba mieszkan przekracza 20) — they never create
+      # one, so the 20 m2 floor must not lift the 0 m2 no-obligation case.
+      - when:
+          zabudowa_srodmiejska: true
+          total_mieszkania: {min: 21}
+        multiply: 0.5
+        at_least: 20.0
+        note: >-
+          par. 40 ust. 14 pkt 2 / ust. 15 pkt 2 — w zabudowie srodmiejskiej
+          dopuszcza sie 50% powierzchni z ust. 8, lecz nie mniej niz 20 m2
+          (dotyczy tylko przypadkow objetych obowiazkiem z ust. 1/8)
+  - name: minimalna-czesc-placu-50m2
+    source_reference: "par. 40 ust. 9"
+    applies_when: {playground_split: true}
+    input: smallest_part_area_m2
+    op: gte
+    threshold: min_part_area_m2
+  - name: udzial-placu-na-pbc
+    source_reference: "par. 40 ust. 1"
+    input: playground_pbc_share
+    op: gte
+    threshold: min_pbc_share
+  - name: naslonecznienie-placu
+    source_reference: "par. 40 ust. 3"
+    input: playground_insolation_hours_equinox
+    op: gte
+    threshold: min_insolation_hours
+    modifiers:
+      - when: {zabudowa_srodmiejska: true}
+        multiply: 0.5
+        note: "par. 40 ust. 3 zd. 2 — srodmiejska: nie krocej niz 1 godzina"
+  - name: odleglosc-placu-10m
+    source_reference: "par. 40 ust. 4"
+    input: playground_min_distance_m
+    op: gte
+    threshold: min_distance_m
+notes: >-
+  Zwolnienia (do decyzji walidatora Phase 10 z danymi o otoczeniu): ust. 14 pkt 1
+  — publiczny plac zabaw w odleglosci dojscia do 750 m (jeden budynek); ust. 15
+  pkt 1 — do 300 m w zabudowie srodmiejskiej (zespol); ust. 14 pkt 3 — sala
+  zabaw wewnatrz budynku (srodmiejska, min 50 m2). Miejsce rekreacyjne dla
+  zespolu >20 mieszkan: ust. 2. Ogrodzenie ust. 5-7, wyposazenie ust. 10-11,
+  stropodachy ust. 12-13. Naslonecznienie dotyczy >=50% powierzchni placu
+  (threshold insolation_area_share) — geometryczna weryfikacje robi caller.

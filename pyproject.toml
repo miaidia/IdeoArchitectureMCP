@@ -53,6 +53,8 @@ dev = [
     "pytest>=8",
     "jsonschema>=4.21",
     "types-PyYAML>=6.0",
+    # Stubs for the Phase 8 ruleset JSON-Schema validation (plot_rules.schema).
+    "types-jsonschema>=4.21",
     # Property-based tests for the geometry core (Phase 5 §5.3, F-0547).
     "hypothesis>=6.100",
     # Fixture-based httpx mocking for connector contract tests (Phase 6 §6.4):

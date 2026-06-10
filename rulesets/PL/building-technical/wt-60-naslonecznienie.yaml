@@ -1,0 +1,94 @@
+# WT §60 — nasłonecznienie pokoi mieszkalnych i pomieszczeń dla dzieci (Phase 8).
+# Literal wording verified against the PRIMARY consolidated text (Dz.U. 2022 poz.
+# 1225) via the ISAP/ELI API on 2026-06-10; §60 unchanged by the 2023/2024 amendments.
+id: PL-WT-60-NASLONECZNIENIE-001
+title: Minimalny czas naslonecznienia pokoi mieszkalnych i pomieszczen dla dzieci (WT par. 60)
+jurisdiction: PL
+valid_from: 2022-06-09
+valid_to: null
+source_reference: "Dz.U. 2022 poz. 1225 par. 60 ust. 1-3 (tekst jednolity WT)"
+source_quote: >-
+  "Pomieszczenia przeznaczone do zbiorowego przebywania dzieci w zlobku, klubie
+  dzieciecym, przedszkolu, innych formach opieki przedszkolnej oraz szkole, z
+  wyjatkiem pracowni chemicznej, fizycznej i plastycznej, powinny miec
+  zapewniony czas naslonecznienia wynoszacy co najmniej 3 godziny w dniach
+  rownonocy w godzinach 8.00-16.00, natomiast pokoje mieszkalne - w godzinach
+  7.00-17.00." (ust. 1); "W mieszkaniach wielopokojowych wymagania ust. 1
+  powinny byc spelnione przynajmniej dla jednego pokoju." (ust. 2); "W przypadku
+  budynkow zlokalizowanych w zabudowie srodmiejskiej dopuszcza sie ograniczenie
+  wymaganego czasu naslonecznienia, okreslonego w ust. 1, do 1,5 godziny, a w
+  odniesieniu do mieszkania jednopokojowego w takiej zabudowie nie okresla sie
+  wymaganego czasu naslonecznienia." (ust. 3)
+verification: isap_primary
+severity: hard
+inputs:
+  - room_type                       # "pokoj_mieszkalny" | "sala_dzieci" (zlobek/klub/przedszkole/szkola)
+  - insolation_hours_equinox        # number — policzone przez caller w wlasciwym oknie czasowym
+  - zabudowa_srodmiejska            # bool — ust. 3
+  - is_single_room_dwelling         # bool — mieszkanie jednopokojowe (ust. 3 in fine)
+outputs:
+  - required_insolation_hours
+  - applicability
+  - confidence
+logic: declarative_checks_v1
+# Conservative assumptions: full requirement unless the relaxing facts are known.
+input_defaults:
+  zabudowa_srodmiejska: false
+  is_single_room_dwelling: false
+thresholds:
+  min_hours_equinox: 3.0            # ust. 1 — rownonoc
+  srodmiejska_min_hours: 1.5        # ust. 3
+  dwelling_window_start_h: 7.0      # ust. 1 — pokoje mieszkalne 7:00-17:00
+  dwelling_window_end_h: 17.0
+  children_window_start_h: 8.0      # ust. 1 — sale dzieci 8:00-16:00
+  children_window_end_h: 16.0
+checks:
+  # Mieszkanie jednopokojowe w zabudowie srodmiejskiej: brak wymogu (ust. 3 in fine).
+  - name: jednopokojowe-srodmiejskie-zwolnienie
+    source_reference: "par. 60 ust. 3 in fine"
+    applies_when:
+      room_type: pokoj_mieszkalny
+      zabudowa_srodmiejska: true
+      is_single_room_dwelling: true
+    op: exempt
+  - name: pokoj-mieszkalny-3h-rownonoc
+    source_reference: "par. 60 ust. 1 i 3"
+    applies_when:
+      room_type: pokoj_mieszkalny
+      is_single_room_dwelling: false
+    input: insolation_hours_equinox
+    op: gte
+    threshold: min_hours_equinox
+    modifiers:
+      - when: {zabudowa_srodmiejska: true}
+        multiply: 0.5
+        note: "par. 60 ust. 3 — zabudowa srodmiejska: ograniczenie do 1,5 godziny"
+  # Pokoj w mieszkaniu jednopokojowym POZA zabudowa srodmiejska: pelny wymog 3 h.
+  - name: pokoj-jednopokojowe-poza-srodmiejska
+    source_reference: "par. 60 ust. 1"
+    applies_when:
+      room_type: pokoj_mieszkalny
+      is_single_room_dwelling: true
+      zabudowa_srodmiejska: false
+    input: insolation_hours_equinox
+    op: gte
+    threshold: min_hours_equinox
+  - name: sala-dzieci-3h-rownonoc
+    source_reference: "par. 60 ust. 1 i 3"
+    applies_when:
+      room_type: sala_dzieci
+    input: insolation_hours_equinox
+    op: gte
+    threshold: min_hours_equinox
+    modifiers:
+      - when: {zabudowa_srodmiejska: true}
+        multiply: 0.5
+        note: >-
+          par. 60 ust. 3 odnosi sie do calego ust. 1 — wedlug literalnego
+          brzmienia redukcja srodmiejska obejmuje takze pomieszczenia dla dzieci
+notes: >-
+  Ust. 2: w mieszkaniach wielopokojowych wystarczy JEDEN pokoj spelniajacy wymog
+  — agregacje per-mieszkanie wykonuje walidator Phase 10 (regula ocenia
+  pojedynczy pokoj). Naslonecznienie liczone w dniach rownonocy (21 III / 21 IX)
+  w oknie czasowym z thresholds; obliczenie cienia (pvlib + ekstruzja 2.5D)
+  wykonuje caller.

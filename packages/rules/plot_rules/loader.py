@@ -1,4 +1,4 @@
-"""Fresh ruleset loader (Phase 2 hot-reload backbone; engine logic lands in Phase 8).
+"""Fresh ruleset loader (Phase 2 hot-reload backbone; evaluation engine in Phase 8).
 
 Rules are versioned declarative YAML files under ``rulesets/PL/**/*.yaml`` following
 base_assumptions §12.2 (``id``/``title``/``jurisdiction``/``valid_from``/``valid_to``/
@@ -6,6 +6,14 @@ base_assumptions §12.2 (``id``/``title``/``jurisdiction``/``valid_from``/``vali
 them *fresh on every call* (no cross-call cache) so an edit to a YAML value is
 reflected on the very next analysis without restarting the MCP process
 (IMPLEMENTATION_PLAN.md Phase 2 §2.1.2, F-0133 / F-0440).
+
+Phase 8 additions: every rule document is validated against the JSON Schema in
+:mod:`plot_rules.schema` (invalid rules are skipped and reported on
+``RulesetRegistry.errors`` — never half-loaded), and ``Rule`` carries ``severity``
+plus the full normalized document (``raw``) so the evaluation engine in
+:mod:`plot_rules.engine` can read the declarative ``applies_when``/``thresholds``/
+``select``/``checks`` fields generically. Legal threshold VALUES live only in the
+YAML files (Phase 8 anti-pattern guard) — this module stays value-free.
 """
 
 from __future__ import annotations
@@ -16,6 +24,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
+from plot_rules.schema import normalize_document, validate_rule_document
 
 
 @dataclass(frozen=True)
@@ -33,6 +43,12 @@ class Rule:
     outputs: list[str]
     logic: Any
     path: str
+    # Phase 8: hard rules fail/blocker-note on violation or unknown; soft rules
+    # surface warnings (§12.1 severity). Default "hard" = fail-closed.
+    severity: str = "hard"
+    # Phase 8: full normalized YAML document (dates -> ISO strings) — the engine
+    # reads applies_when/thresholds/select/checks/input_defaults from here.
+    raw: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -48,6 +64,9 @@ class RulesetRegistry:
     ruleset_version: str = "PL-empty"
     categories: tuple[str, ...] = field(default_factory=tuple)
     root: str = ""
+    # Phase 8: schema-validation failures ("<path>: <error>"); the offending rule
+    # is skipped, never half-loaded. Surfaced via diagnostics/ruleset_explain.
+    errors: tuple[str, ...] = field(default_factory=tuple)
 
     def by_category(self, category: str) -> list[Rule]:
         return [r for r in self.rules if r.category == category]
@@ -80,6 +99,7 @@ def load_rulesets(directory: str | Path = "rulesets/PL") -> RulesetRegistry:
         return RulesetRegistry(root=str(root))
 
     rules: list[Rule] = []
+    errors: list[str] = []
     hasher = hashlib.sha256()
     for yaml_path in sorted(root.rglob("*.y*ml")):
         if not yaml_path.is_file():
@@ -90,6 +110,13 @@ def load_rulesets(directory: str | Path = "rulesets/PL") -> RulesetRegistry:
         doc = yaml.safe_load(raw) or {}
         if not isinstance(doc, dict) or "id" not in doc:
             # Tolerate sources.md-style sidecars / non-rule yaml without crashing.
+            continue
+        # Phase 8: structural JSON Schema validation; a malformed rule is skipped
+        # and reported (never half-loaded into evaluations).
+        normalized = normalize_document(doc)
+        doc_errors = validate_rule_document(normalized)
+        if doc_errors:
+            errors.extend(f"{yaml_path}: {e}" for e in doc_errors)
             continue
         category = _category_for(yaml_path, root)
         rules.append(
@@ -105,6 +132,8 @@ def load_rulesets(directory: str | Path = "rulesets/PL") -> RulesetRegistry:
                 outputs=[str(x) for x in (doc.get("outputs") or [])],
                 logic=doc.get("logic"),
                 path=str(yaml_path),
+                severity=str(doc.get("severity", "hard")),
+                raw=normalized,
             )
         )
 
@@ -116,6 +145,7 @@ def load_rulesets(directory: str | Path = "rulesets/PL") -> RulesetRegistry:
         ruleset_version=version,
         categories=categories,
         root=str(root),
+        errors=tuple(errors),
     )
 
 

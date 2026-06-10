@@ -1,8 +1,79 @@
-"""MPZP/POG/WZ parsers and planning model (Phase 8).
+"""Planning intelligence (Phase 8): APP/GML pipeline + document parser + use matrix.
 
-Stub package for the Plot Analyzer monorepo. Implementation is deferred to a
-later phase per AGENTS/IMPLEMENTATION_PLAN.md; this module exists so the uv
-workspace resolves and the package is importable.
+Public surface:
+
+* :func:`parse_app_gml` / :func:`zone_coverage` / :func:`indicators_from_zone` —
+  APP GML (XSD v2.0, Dz.U. 2023 poz. 2409) → ``PlanningAct``/``PlanningZone`` +
+  zone∩parcel coverage % (F-0108–0111);
+* :class:`PlanningStore` / :data:`DEFAULT_PLANNING_STORE` — process-local store
+  behind ``planning_fetch`` and the ``planning://`` resources;
+* :mod:`plot_planning.parser` — the §29 document parser (deterministic
+  extractors + LLM-candidate validation with hallucination rejection, F-0550),
+  untrusted-content mode (NFR-SEC-002/003/009);
+* :func:`use_matrix_for` — allowed/conditional/forbidden per investment category
+  (F-0121–0123);
+* :func:`detect_conflicts` — GML-vs-document conflicts, never auto-resolved
+  (§25.2, F-0125);
+* :func:`stability_score` — traced planning-stability heuristic (F-0126).
+
+Decoupling (§9.4): no imports of ``plot_connectors`` (fetching is orchestrated
+above this layer) and no legal threshold values in code (rulesets only).
 """
 
-__version__ = "0.1.0"
+from __future__ import annotations
+
+from plot_planning.conflicts import (
+    MANUAL_REVIEW_REQUIRED,
+    Conflict,
+    IndicatorValue,
+    detect_conflicts,
+)
+from plot_planning.gml import (
+    UNKNOWN_ACT_ID,
+    GmlParseError,
+    ParsedPlanning,
+    ZoneCoverage,
+    indicators_from_zone,
+    parse_app_gml,
+    zone_coverage,
+)
+from plot_planning.parser import (
+    INDICATOR_NAMES,
+    PLANNING_INDICATORS_SCHEMA,
+    IndicatorExtraction,
+    extract_indicators,
+    missing_indicators,
+    screen_document,
+    validate_candidates,
+)
+from plot_planning.stability import stability_score
+from plot_planning.store import DEFAULT_PLANNING_STORE, PlanningStore
+from plot_planning.use_matrix import USE_CATEGORIES, use_matrix_for
+
+__version__ = "0.2.0"
+
+__all__ = [
+    "DEFAULT_PLANNING_STORE",
+    "INDICATOR_NAMES",
+    "MANUAL_REVIEW_REQUIRED",
+    "PLANNING_INDICATORS_SCHEMA",
+    "UNKNOWN_ACT_ID",
+    "USE_CATEGORIES",
+    "Conflict",
+    "GmlParseError",
+    "IndicatorExtraction",
+    "IndicatorValue",
+    "ParsedPlanning",
+    "PlanningStore",
+    "ZoneCoverage",
+    "detect_conflicts",
+    "extract_indicators",
+    "indicators_from_zone",
+    "missing_indicators",
+    "parse_app_gml",
+    "screen_document",
+    "stability_score",
+    "use_matrix_for",
+    "validate_candidates",
+    "zone_coverage",
+]

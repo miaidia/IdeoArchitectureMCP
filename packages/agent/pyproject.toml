@@ -21,6 +21,8 @@ dependencies = [
     "plot-geo",
     "plot-connectors",
     "plot-envelope",
+    # Phase 8: planning store + zone coverage feed the analysis planning block.
+    "plot-planning",
 ]
 
 [tool.uv.sources]
@@ -31,6 +33,7 @@ plot-reports = { workspace = true }
 plot-geo = { workspace = true }
 plot-connectors = { workspace = true }
 plot-envelope = { workspace = true }
+plot-planning = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

@@ -1,0 +1,58 @@
+# Wskaźniki parkingowe — WYŁĄCZNIE z MPZP/WZ (Phase 8 ruleset corpus; hard guard).
+# There is NO national parking norm for dwellings in Polish law — the indicator
+# comes from the planning act (MPZP/WZ) for the specific parcel. Anti-pattern
+# guard (§0v2.4): this rule must never carry a numeric national default.
+id: PL-PLAN-PARKING-MPZP-001
+title: Liczba miejsc postojowych wedlug wskaznika z MPZP/WZ (brak normy krajowej)
+jurisdiction: PL
+# Planning-act framework: ustawa o planowaniu i zagospodarowaniu przestrzennym
+# (MPZP determines parking indicators); rule adopted into this corpus 2026-06-10.
+valid_from: 2026-06-10
+valid_to: null
+source_reference: >-
+  Ustawa z 27.03.2003 o planowaniu i zagospodarowaniu przestrzennym (t.j. Dz.U.
+  2023 poz. 977, z pozn. zm.), art. 15 ust. 2 pkt 6 — MPZP okresla m.in.
+  "minimalna liczbe miejsc do parkowania"; rozp. w sprawie warunkow technicznych
+  (Dz.U. 2022 poz. 1225 par. 18) wymaga zapewnienia stanowisk "stosownie do
+  potrzeb", nie podaje liczby
+source_quote: >-
+  art. 15 ust. 2 ustawy o pizp: "W planie miejscowym okresla sie obowiazkowo:
+  [...] 6) zasady ksztaltowania zabudowy oraz wskazniki zagospodarowania
+  terenu [...] minimalna liczbe miejsc do parkowania w tym miejsca przeznaczone
+  na parkowanie pojazdow zaopatrzonych w karte parkingowa i sposob ich
+  realizacji" — wartosc liczbowa istnieje tylko w akcie planistycznym danego
+  terenu (typowo 1-2 mp/mieszkanie albo na 60 m2 PUM; uslugi na 100/1000 m2).
+verification: isap_primary
+severity: hard
+# The numeric indicator's origin is the planning act — never a national constant.
+source: planning_act
+default: unknown
+inputs:
+  - parking_rate_per_mieszkanie     # number — wskaznik z MPZP/WZ (NIE ma wartosci domyslnej!)
+  - parking_requirement_known       # bool — czy wskaznik zostal ustalony z aktu planistycznego
+  - parking_spaces_required         # number — wymagana liczba mp (liczy caller: wskaznik x mieszkania + uslugi)
+  - parking_spaces_provided         # number — zapewniona liczba mp w projekcie
+outputs:
+  - parking_balance
+  - applicability
+  - confidence
+logic: declarative_checks_v1
+checks:
+  # Hard guard: the MPZP/WZ indicator must be KNOWN. Missing -> unknown (a
+  # blocker question for the gmina), NEVER a default number.
+  - name: wskaznik-parkingowy-z-aktu-planistycznego
+    source_reference: "art. 15 ust. 2 pkt 6 ustawy o pizp"
+    input: parking_rate_per_mieszkanie
+    op: present
+  - name: bilans-miejsc-postojowych
+    source_reference: "MPZP/WZ dla danego terenu"
+    applies_when: {parking_requirement_known: true}
+    input: parking_spaces_provided
+    op: gte
+    other_input: parking_spaces_required
+notes: >-
+  Brak krajowej normy liczbowej miejsc postojowych dla mieszkan — wskaznik
+  pochodzi z MPZP (art. 15 ust. 2 pkt 6 upizp) albo decyzji WZ. Gdy brak planu
+  i decyzji: wynik unknown + pytanie do gminy (nigdy wartosc domyslna).
+  Odleglosci i wymiary stanowisk: PL-WT-19-PARKING-DISTANCES-001 i
+  PL-WT-21-PARKING-DIMENSIONS-001.

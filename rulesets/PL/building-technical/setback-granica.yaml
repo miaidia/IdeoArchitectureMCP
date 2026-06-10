@@ -1,11 +1,19 @@
 # Example building-technical precheck rule (base_assumptions §12.2; category §12.3
 # PL/building-technical). Verbatim shape from the spec example.
+# RETIRED (Phase 8): superseded by wt-12-setbacks.yaml (PL-WT-12-SETBACKS-001),
+# which encodes WT par. 12 in the evaluable declarative_checks_v1 grammar with the
+# amendment values in force from 2024-08-01. valid_to closes this exemplar at
+# 2024-07-31 so the same legal scope is not reported twice.
 id: PL-WT-SETBACK-GRANICA-001
 title: Minimalna odleglosc budynku od granicy dzialki
 jurisdiction: PL
 valid_from: 2024-01-01
-valid_to: null
+valid_to: 2024-07-31
 source_reference: "rulesets/PL/building-technical/sources.md#wt-setback"
+notes: >-
+  Superseded by PL-WT-12-SETBACKS-001 (wt-12-setbacks.yaml) as of 2024-08-01 —
+  use that rule for par. 12 evaluations; this document remains as the Phase 2
+  loader exemplar and quick-screening default-setback source.
 inputs:
   - building_wall_type
   - parcel_boundary

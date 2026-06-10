@@ -1,0 +1,105 @@
+# WT §12 — odległości budynku od granicy działki budowlanej (Phase 8 ruleset corpus).
+# Values verified against the PRIMARY consolidated text via the ISAP/ELI API
+# (api.sejm.gov.pl, Dz.U. 2022 poz. 1225 + amendment texts) on 2026-06-10.
+id: PL-WT-12-SETBACKS-001
+title: Minimalne odleglosci budynku od granicy dzialki budowlanej (WT par. 12 ust. 1-2)
+jurisdiction: PL
+# The 5 m rule for wielorodzinny >4 kondygnacje entered into force 2024-08-01
+# (Dz.U. 2023 poz. 2442, termin wejscia w zycie zmieniony przez Dz.U. 2024 poz. 474).
+valid_from: 2024-08-01
+valid_to: null
+source_reference: >-
+  Dz.U. 2022 poz. 1225 par. 12 ust. 1-2, zm. Dz.U. 2023 poz. 2442 (w mocy od
+  2024-08-01 na mocy Dz.U. 2024 poz. 474), zm. Dz.U. 2024 poz. 726 (ust. 1
+  czesc wspolna + ust. 1a, w mocy od 2024-08-15)
+source_quote: >-
+  "budynek na dzialce budowlanej nalezy sytuowac w odleglosci od granicy tej
+  dzialki nie mniejszej niz: 1) 4 m - w przypadku budynku zwroconego sciana z
+  oknami lub drzwiami w strone tej granicy; 2) 3 m - w przypadku budynku
+  zwroconego sciana bez okien lub drzwi w strone tej granicy; 3) 5 m - w
+  przypadku budynku mieszkalnego wielorodzinnego o wysokosci ponad 4 kondygnacji
+  nadziemnych, zwroconego sciana z oknami lub drzwiami w strone tej granicy;
+  4) 5 m - [jw.] sciana bez okien lub drzwi [...] - przy czym kazda plaszczyzne
+  powstala w wyniku zalamania lub uskoku sciany traktuje sie jako oddzielna
+  sciane." (par. 12 ust. 1) "2. W przypadkach, o ktorych mowa w ust. 1 pkt 2 i 4,
+  dopuszcza sie sytuowanie budynku w odleglosci nie mniejszej niz 1,5 m od
+  granicy lub bezposrednio przy tej granicy, jezeli miejscowy plan
+  zagospodarowania przestrzennego przewiduje taka mozliwosc."
+verification: isap_primary
+severity: hard
+inputs:
+  - wall_has_windows_or_doors      # bool — sciana z oknami lub drzwiami w strone granicy
+  - is_multifamily_over_4_storeys  # bool — budynek mieszkalny wielorodzinny >4 kondygnacje nadziemne
+  - distance_to_boundary_m         # number — odleglosc sciany (kazdej plaszczyzny!) od granicy
+  - mpzp_allows_reduced_setback    # bool — MPZP dopuszcza 1,5 m / przy granicy (ust. 2)
+outputs:
+  - required_setback_m
+  - applicability
+  - confidence
+logic: declarative_checks_v1
+# Conservative assumptions when an input is absent (recorded in trace, never silent):
+# no MPZP relaxation -> the full ust. 1 distances apply (stricter).
+input_defaults:
+  mpzp_allows_reduced_setback: false
+thresholds:
+  setback_windows_m: 4.0            # ust. 1 pkt 1
+  setback_no_windows_m: 3.0         # ust. 1 pkt 2
+  setback_multifamily_over4_m: 5.0  # ust. 1 pkt 3 i 4 (oba przypadki scian)
+  setback_mpzp_reduced_m: 1.5       # ust. 2 (tylko sciany bez okien/drzwi: pkt 2 i 4)
+checks:
+  - name: sciana-z-oknami-standard
+    source_reference: "par. 12 ust. 1 pkt 1"
+    applies_when:
+      wall_has_windows_or_doors: true
+      is_multifamily_over_4_storeys: false
+    input: distance_to_boundary_m
+    op: gte
+    threshold: setback_windows_m
+  - name: sciana-bez-okien-standard
+    source_reference: "par. 12 ust. 1 pkt 2 / ust. 2"
+    applies_when:
+      wall_has_windows_or_doors: false
+      is_multifamily_over_4_storeys: false
+      mpzp_allows_reduced_setback: false
+    input: distance_to_boundary_m
+    op: gte
+    threshold: setback_no_windows_m
+  - name: sciana-z-oknami-wielorodzinny-pow-4-kondygnacje
+    source_reference: "par. 12 ust. 1 pkt 3"
+    applies_when:
+      wall_has_windows_or_doors: true
+      is_multifamily_over_4_storeys: true
+    input: distance_to_boundary_m
+    op: gte
+    threshold: setback_multifamily_over4_m
+  - name: sciana-bez-okien-wielorodzinny-pow-4-kondygnacje
+    source_reference: "par. 12 ust. 1 pkt 4 / ust. 2"
+    applies_when:
+      wall_has_windows_or_doors: false
+      is_multifamily_over_4_storeys: true
+      mpzp_allows_reduced_setback: false
+    input: distance_to_boundary_m
+    op: gte
+    threshold: setback_multifamily_over4_m
+  # ust. 2: MPZP-permitted relaxation to >=1.5 m applies ONLY to windowless
+  # walls (ust. 1 pkt 2 i 4) — including, per the literal amended text, the
+  # windowless wall of a >4-kondygnacje multifamily building.
+  - name: sciana-bez-okien-mpzp-dopuszcza-1-5
+    source_reference: "par. 12 ust. 2"
+    applies_when:
+      wall_has_windows_or_doors: false
+      mpzp_allows_reduced_setback: true
+    input: distance_to_boundary_m
+    op: gte
+    threshold: setback_mpzp_reduced_m
+notes: >-
+  Par. 12 ust. 1a (Dz.U. 2024 poz. 726, w mocy od 2024-08-15) dopuszcza dla
+  przypadku ust. 1 pkt 1 (sciana z oknami, 4 m) odleglosc >=3 m, gdy sciana jest
+  nierownolegla do granicy i krawedz okna/drzwi jest >=4 m od granicy — ust. 1a
+  NIE obejmuje pkt 3 (wielorodzinny >4 kondygnacje, 5 m). Kazda plaszczyzna po
+  zalamaniu/uskoku sciany = oddzielna sciana (ust. 1 czesc wspolna); walidator
+  Phase 10 dokonuje dekompozycji scian przed wywolaniem tej reguly. Ust. 3-4
+  (zabudowa jednorodzinna/zagrodowa, przyleganie do sciany sasiada) oraz ust. 6
+  (okapy, balkony — w tym 3 m do balkonu budynku z pkt 3 i 4) pozostaja do
+  walidacji geometrycznej Phase 10. Ust. 10: odleglosci nie obowiazuja, gdy
+  sasiednia dzialka jest dzialka drogowa lub publicznie dostepnym placem.
