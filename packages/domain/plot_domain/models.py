@@ -300,13 +300,50 @@ class CapacityScenario(_Base):
     )
 
 
+class LokalRecord(_Base):
+    """One lokal (dwelling/service unit) of a storey — PW-horizon PLACEHOLDER (Phase 15).
+
+    The projekt techniczny/wykonawczy horizon (AGENTS/PW_DIRECTION.md) needs
+    lokal-level data (PN-ISO 9836 lokal measurement, unit mixes). The schema slot
+    exists NOW so deepening later is additive (no schema break); nothing in v2
+    fills it — lists stay empty until a PW-phase actually measures lokale.
+    """
+
+    id: str = Field(description="Lokal record id.")
+    storey_level: int = Field(description="Owning storey level (0 = parter).")
+    use: str = Field(description="Lokal use (mieszkanie | lokal_uslugowy | ...).")
+    area_m2: float | None = Field(
+        default=None, ge=0.0, description="Lokal usable area in m^2 (PN-ISO 9836; PW horizon)."
+    )
+
+
 class StoreyRecord(_Base):
-    """One storey of a building (Phase 9 PB-forward placeholder; filled in Phase 15)."""
+    """One storey of a building (Phase 9 PB-forward placeholder; FILLED since Phase 15).
+
+    Filled from the DSL-v2 segments at variant-store time (Phase 15 Task 1):
+    ``area_m2`` is the sum of OWNED (non-double-counted) segment footprint areas
+    contributing to the level; ``use`` honours ``ground_floor_use`` on level 0.
+    Every PB-relevant quantity carries its measurement basis in ``basis``
+    (heuristic vs computed vs surveyed — the Phase 9 basis idiom extended).
+    """
 
     level: int = Field(description="Storey level (0 = parter; negative = underground).")
     height_m: float | None = Field(default=None, description="Clear storey height in metres.")
     use: str = Field(description="Storey use (mieszkalny | uslugowy | garaz | techniczny | ...).")
     area_m2: float | None = Field(default=None, ge=0.0, description="Storey floor area in m^2.")
+    basis: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Measurement basis per quantity (Phase 15): e.g. area_m2 -> "
+            "geometry_measured, height_m -> industry_heuristic (config floor "
+            "height, NOT a survey), use -> dsl_declared. Surveyed values would "
+            "carry 'surveyed' — none exist in v2 (honesty, §21)."
+        ),
+    )
+    lokale: list[LokalRecord] = Field(
+        default_factory=list,
+        description="Lokal records (PW-horizon placeholder — empty in v2; no schema break later).",
+    )
 
 
 class BuildingRecord(_Base):
@@ -337,7 +374,10 @@ class BuildingRecord(_Base):
     )
     storeys: list[StoreyRecord] = Field(
         default_factory=list,
-        description="PB-forward storey records (empty until Phase 15; no schema break later).",
+        description=(
+            "PB-forward storey records (filled from DSL floors at variant-store "
+            "time since Phase 15; basis-marked heights/areas)."
+        ),
     )
 
 

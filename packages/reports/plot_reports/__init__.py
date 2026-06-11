@@ -63,6 +63,18 @@ from plot_reports.preview import (
     render_preview,
     sample_preview_layers,
 )
+from plot_reports.pzt import (
+    PZT_DISCLAIMER,
+    PZT_SCALE_DENOMINATOR,
+    PztDrawing,
+    PztOpisowa,
+    build_pzt_checklist,
+    build_pzt_opisowa,
+    pzt_filename,
+    render_pzt_opisowa_json,
+    render_pzt_opisowa_markdown,
+    render_pzt_rysunkowa,
+)
 from plot_reports.redaction import (
     PII_FIELD_NAMES,
     REDACTION_PLACEHOLDER,
@@ -133,6 +145,17 @@ __all__ = [
     "PII_FIELD_NAMES",
     "REDACTION_PLACEHOLDER",
     "redact_model_for_sharing",
+    # PZT draft package (Phase 15 — Dz.U. 2020/1609 t.j. 2022/1679 §13–18)
+    "PZT_DISCLAIMER",
+    "PZT_SCALE_DENOMINATOR",
+    "PztDrawing",
+    "PztOpisowa",
+    "build_pzt_checklist",
+    "build_pzt_opisowa",
+    "pzt_filename",
+    "render_pzt_opisowa_json",
+    "render_pzt_opisowa_markdown",
+    "render_pzt_rysunkowa",
     # GIS/CAD/BIM exports (Phase 14)
     "DXF_LAYERS",
     "ExportLayer",

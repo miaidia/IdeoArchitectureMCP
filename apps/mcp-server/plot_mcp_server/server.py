@@ -277,12 +277,17 @@ def report_generate(
         str,
         Field(
             description=(
-                "md | html | pdf | json | png | koncepcja (Phase 11: multi-building "
-                "chłonność concept — plan render + per-building/per-stage PUM tables + "
-                "WT/ppoż compliance + design rationale + questions for the gmina). "
-                "html/pdf (Phase 14, §31) render from the SAME report model as md/json "
-                "(with variant_id → the koncepcja deliverable); pdf reports "
-                "pdf_unavailable honestly when the weasyprint system stack is absent."
+                "md | html | pdf | json | png | koncepcja | pzt-draft. koncepcja "
+                "(Phase 11): multi-building chłonność concept — plan render + "
+                "per-building/per-stage PUM tables + WT/ppoż compliance + design "
+                "rationale + questions for the gmina. html/pdf (Phase 14, §31) "
+                "render from the SAME report model as md/json (with variant_id → "
+                "the koncepcja deliverable); pdf reports pdf_unavailable honestly "
+                "when the weasyprint system stack is absent. pzt-draft (Phase 15): "
+                "PZT draft package per Dz.U. 2020/1609 (t.j. 2022/1679) §13–18 — "
+                "część opisowa (MD+JSON), scaled vector rysunkowa (SVG+PDF, e-form "
+                "naming PZT_rrrr.mm.dd) + §13–18 checklist; ALWAYS a draft for a "
+                "projektant, NEVER a projekt budowlany (mandatory disclaimer)."
             )
         ),
     ] = "md",
@@ -290,9 +295,10 @@ def report_generate(
         str | None,
         Field(
             description=(
-                "Masterplan variant id for format='koncepcja'/'html'/'pdf' (from "
-                "propose_layout's structuredContent.variant_id); default = the latest "
-                "stored variant (koncepcja) / the screening report (html/pdf)."
+                "Masterplan variant id for format='koncepcja'/'html'/'pdf'/"
+                "'pzt-draft' (from propose_layout's structuredContent.variant_id); "
+                "default = the latest stored variant (koncepcja/pzt-draft) / the "
+                "screening report (html/pdf)."
             )
         ),
     ] = None,

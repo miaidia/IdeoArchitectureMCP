@@ -33,9 +33,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from plot_domain import CapacityScenario, Severity, UnknownItem
+from plot_domain import CapacityScenario, Severity, StoreyRecord, UnknownItem
 from plot_rules import RuleCheck, RulesetRegistry, evaluate
 from shapely.geometry.base import BaseGeometry
+from shapely.ops import unary_union
 
 # --------------------------------------------------------------------------- #
 # Basis tags (anti-pattern guard §0v2.4: PUM must never appear without a basis).
@@ -149,12 +150,26 @@ class ParkingLike(Protocol):
     @property
     def spaces(self) -> int: ...
 
+    def geometry(self) -> BaseGeometry: ...
+
+
+class RoadLike(Protocol):
+    """One internal road: function-tagged centerline buffered to a corridor polygon."""
+
+    @property
+    def function(self) -> str: ...
+
+    def to_polygon(self) -> BaseGeometry: ...
+
 
 class MasterplanLike(Protocol):
     """The duck-typed surface of :class:`plot_agent.drawing.proposal.MasterplanProposal`."""
 
     @property
     def buildings(self) -> Sequence[BuildingLike]: ...
+
+    @property
+    def roads(self) -> Sequence[RoadLike]: ...
 
     @property
     def parking(self) -> Sequence[ParkingLike]: ...
@@ -381,6 +396,94 @@ def building_metrics(building: BuildingLike, config: CapacityConfig | None = Non
 
 
 # --------------------------------------------------------------------------- #
+# Storey records (Phase 15 Task 1 — PB-forward domain deepening)
+# --------------------------------------------------------------------------- #
+def _storey_use(segment: SegmentLike, level: int) -> str:
+    """Effective use of ``segment`` at storey ``level`` (DSL-declared semantics).
+
+    Level 0 honours ``ground_floor_use``; a ``mieszkalno-uslugowy`` segment
+    without an explicit parter use keeps the engine's conservative assumption
+    (parter → usługi) — the SAME split :func:`_segment_split` applies, so the
+    storey record never contradicts the PUM/PUU attribution. Upper levels of a
+    ``mieszkalno-uslugowy`` segment are residential.
+    """
+    if level == 0:
+        if segment.ground_floor_use is not None:
+            return str(segment.ground_floor_use)
+        if segment.use == "mieszkalno-uslugowy":
+            return "uslugowy"  # mirrors the _segment_split assumption
+        return str(segment.use)
+    if segment.use == "mieszkalno-uslugowy":
+        return "mieszkalny"
+    return str(segment.use)
+
+
+def building_storeys(
+    building: BuildingLike, config: CapacityConfig | None = None
+) -> list[StoreyRecord]:
+    """Derive :class:`~plot_domain.StoreyRecord`s from the DSL segments (Phase 15).
+
+    One record per storey, underground levels first (``-underground_floors`` …
+    ``-1``, use ``garaz`` — the hala garażowa reading of ``underground_floors``)
+    then above-ground levels ``0 … max(floors)-1``. Per level:
+
+    * ``area_m2`` — sum of the OWNED (non-double-counted, taller-segment-wins)
+      segment footprint areas of segments reaching that level — the same
+      :func:`_owned_segment_areas` decomposition the PC/PUM metrics use
+      (basis ``geometry_measured``);
+    * ``use`` — the area-dominant effective use among contributing segments
+      (level 0 honours ``ground_floor_use`` — usługi w parterze ⇒ storey 0 is
+      ``uslugowy``; basis ``dsl_declared``);
+    * ``height_m`` — the CONFIG floor height (basis ``industry_heuristic`` —
+      it is an estimation factor, NOT a survey/design value, §21 honesty).
+
+    ``lokale`` stays an empty placeholder list (PW horizon, AGENTS/PW_DIRECTION.md).
+    """
+    cfg = config or CapacityConfig()
+    basis = {
+        "area_m2": BASIS_GEOMETRY,
+        "height_m": BASIS_HEURISTIC,  # config floor height, not surveyed/designed
+        "use": "dsl_declared",
+    }
+    storeys: list[StoreyRecord] = []
+    footprint_m2 = float(building.footprint_geometry().area)
+    for level in range(-int(building.underground_floors), 0):
+        storeys.append(
+            StoreyRecord(
+                level=level,
+                height_m=cfg.floor_height_m,
+                use="garaz",
+                area_m2=round(footprint_m2, 2),
+                basis=dict(basis),
+            )
+        )
+    segments = list(building.segments)
+    owned_areas, _overlap = _owned_segment_areas(segments)
+    max_floors = max((int(s.floors) for s in segments), default=0)
+    for level in range(max_floors):
+        use_areas: dict[str, float] = {}
+        level_area = 0.0
+        for segment, owned in zip(segments, owned_areas, strict=True):
+            if int(segment.floors) <= level:
+                continue
+            level_area += owned
+            use = _storey_use(segment, level)
+            use_areas[use] = use_areas.get(use, 0.0) + owned
+        # Area-dominant use; deterministic tie-break by name.
+        use = min(use_areas, key=lambda u: (-use_areas[u], u)) if use_areas else "nieznane"
+        storeys.append(
+            StoreyRecord(
+                level=level,
+                height_m=cfg.floor_height_m,
+                use=use,
+                area_m2=round(level_area, 2),
+                basis=dict(basis),
+            )
+        )
+    return storeys
+
+
+# --------------------------------------------------------------------------- #
 # Masterplan totals / stage table / PBC / parking / plac zabaw
 # --------------------------------------------------------------------------- #
 @dataclass
@@ -403,6 +506,11 @@ class MasterplanMetrics:
     unknowns: list[UnknownItem]
     config_basis: dict[str, Any]
     warnings: list[str] = field(default_factory=list)
+    #: Phase 15: the PZT §14 zestawienie powierzchni (zabudowa / drogi+utwardzenia /
+    #: PBC / inne) — computed HERE, in the capacity engine, as the single source of
+    #: truth; the PZT opisowa only RENDERS these numbers (anti-pattern §15.4:
+    #: "one computation, two renderings", test-enforced equality).
+    zestawienie: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -416,6 +524,7 @@ class MasterplanMetrics:
             "unknowns": [u.model_dump(mode="json") for u in self.unknowns],
             "config_basis": self.config_basis,
             "warnings": self.warnings,
+            "zestawienie_powierzchni": self.zestawienie,
         }
 
 
@@ -742,6 +851,84 @@ def masterplan_metrics(
             }
         )
 
+    # ---- zestawienie powierzchni (Phase 15 — PZT §14, Dz.U. 2022 poz. 1679) -------- #
+    # Computed HERE (single source of truth; the PZT opisowa only renders it):
+    # * zabudowa — EXACTLY totals['powierzchnia_zabudowy_m2'] (same number, no
+    #   recomputation — anti-pattern §15.4 guard);
+    # * drogi i utwardzenia — union of road corridors + SURFACE parking, clipped to
+    #   the parcel (drawn corridors may legitimately run to the public road outside);
+    # * PBC — the pbc block's pbc_m2 (greenery ∪ playground-credit; 'unknown' stays
+    #   'unknown' — never guessed);
+    # * inne — residual parcel area; components may overlap (e.g. zieleń over a hala
+    #   garażowa), so the residual is floored at 0 and the note says so.
+    paving_geoms = [road.to_polygon() for road in proposal.roads]
+    paving_geoms.extend(p.geometry() for p in proposal.parking if str(p.kind) == "naziemny")
+    paving_m2 = (
+        round(float(unary_union(paving_geoms).intersection(parcel_geom).area), 2)
+        if paving_geoms
+        else 0.0
+    )
+    zabudowa_m2 = totals["powierzchnia_zabudowy_m2"]
+    inne_m2: float | str
+    if isinstance(pbc_m2, float):
+        inne_m2 = round(max(0.0, parcel_area - zabudowa_m2 - paving_m2 - pbc_m2), 2)
+    else:
+        inne_m2 = "unknown"
+    # Review F2: the component semantics above are the documented Phase 9 contract
+    # (numbers are NEVER silently renumbered), but where component EXTENTS overlap
+    # (e.g. a road corridor crossing zieleń) the per-component sum double-counts
+    # ground area and 'inne' may be clamped at 0 — both used to be prose-only.
+    # The double count is machine-readable: overlap_m2 = Σ area(componentᵢ ∩
+    # parcel) − area(union(componentᵢ ∩ parcel)), computed on the geometric
+    # extents (zabudowa ∪ footprints; drogi+utwardzenia; zieleń ∪ plac zabaw —
+    # the WT §40 credit SCALAR does not change the playground's ground extent).
+    component_geoms = [
+        proposal.buildings_footprint_geometry(),
+        unary_union([greenery_geom, playground_geom]),
+    ]
+    if paving_geoms:
+        component_geoms.append(unary_union(paving_geoms))
+    clipped_components = [g.intersection(parcel_geom) for g in component_geoms]
+    overlap_m2 = round(
+        max(
+            0.0,
+            sum(float(g.area) for g in clipped_components)
+            - float(unary_union(clipped_components).area),
+        ),
+        2,
+    )
+    if overlap_m2 > 1.0:
+        warnings.append(
+            f"zestawienie powierzchni: składniki (zabudowa / drogi i utwardzenia / "
+            f"PBC) nakładają się na {overlap_m2:.2f} m² — suma składników liczy tę "
+            "powierzchnię podwójnie, a 'inne' (rezydualne) może być przycięte do 0; "
+            "semantyka składników pozostaje bez zmian (kontrakt Phase 9), nakładka "
+            "jest raportowana w polu 'overlap_m2'."
+        )
+    zestawienie: dict[str, Any] = {
+        "parcel_area_m2": totals["parcel_area_m2"],
+        "zabudowa_m2": zabudowa_m2,
+        "drogi_i_utwardzenia_m2": paving_m2,
+        "pbc_m2": pbc_m2,
+        "inne_m2": inne_m2,
+        "overlap_m2": overlap_m2,
+        "basis": {
+            "zabudowa_m2": BASIS_GEOMETRY,
+            "drogi_i_utwardzenia_m2": BASIS_GEOMETRY,
+            "pbc_m2": BASIS_GEOMETRY if isinstance(pbc_m2, float) else "unknown",
+            "inne_m2": "derived_residual" if isinstance(inne_m2, float) else "unknown",
+            "overlap_m2": BASIS_GEOMETRY,
+        },
+        "note": (
+            "Zestawienie wg układu §14 rozporządzenia o projekcie budowlanym "
+            "(Dz.U. 2020 poz. 1609, t.j. 2022 poz. 1679): drogi/utwardzenia "
+            "przycięte do granicy działki; PBC = zieleń ∪ kredyt placu zabaw "
+            "(WT §40); składniki mogą się nakładać (np. zieleń nad halą "
+            "garażową) — 'inne' jest rezydualne, min. 0, a powierzchnia "
+            "nakładania się składników jest raportowana w 'overlap_m2'."
+        ),
+    }
+
     return MasterplanMetrics(
         per_building=per_building,
         totals=totals,
@@ -753,6 +940,7 @@ def masterplan_metrics(
         unknowns=unknowns,
         config_basis=cfg.basis_block(),
         warnings=warnings,
+        zestawienie=zestawienie,
     )
 
 

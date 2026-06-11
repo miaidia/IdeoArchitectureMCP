@@ -147,6 +147,26 @@ class TerrainAnalysis:
             "basis": "industry_heuristic",
         }
 
+    def elevation_at(self, x: float, y: float) -> float | None:
+        """Spot elevation (rzędna terenu, m n.p.m.) at one point — Phase 15 PZT.
+
+        Reads the kept windowed elevation grid (no raster re-read). Returns
+        ``None`` when terrain did not run, the point falls outside the sampled
+        window, or the cell is nodata — the PZT rysunkowa renders an honest
+        omission note instead of inventing a rzędna (anti-pattern §15.4).
+        """
+        if self.status != "ok" or self._elev is None:
+            return None
+        from rasterio.transform import rowcol  # rasterio docs: transform.rowcol
+
+        row, col = rowcol(self._transform, x, y)
+        if not (0 <= row < self._elev.shape[0] and 0 <= col < self._elev.shape[1]):
+            return None
+        if bool(self._nodata_mask[row, col]):
+            return None
+        value = float(self._elev[row, col])
+        return value if math.isfinite(value) else None
+
     def _classify_slope(self, mean_pct: float) -> str:
         cfg = self._config
         if mean_pct < cfg.slope_flat_pct:

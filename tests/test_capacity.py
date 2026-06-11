@@ -323,6 +323,47 @@ def test_no_cross_building_warning_when_disjoint(golden_metrics) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Zestawienie powierzchni: overlapping components are machine-readable (review F2)
+# --------------------------------------------------------------------------- #
+def test_zestawienie_overlap_machine_readable_with_warning(registry) -> None:
+    """Review F2: a road corridor crossing zieleń double-counts the crossing in
+    drogi AND PBC. Component semantics stay (Phase 9 contract — numbers are NOT
+    silently renumbered), but the double count is emitted as ``overlap_m2`` and
+    flagged in ``MasterplanMetrics.warnings``."""
+    proposal = MasterplanProposal.model_validate(
+        {
+            "buildings": [
+                {"name": "A", "segments": [
+                    {"polygon": _rect(0, 0, 20, 30), "floors": 3, "use": "mieszkalny"}]},
+            ],
+            # Corridor y∈[40,60] (100×20 = 2000 m²) crosses greenery x∈[60,90]
+            # (30×100 = 3000 m²) → 30×20 = 600 m² counted in BOTH components.
+            "roads": [
+                {"centerline": {"type": "LineString", "coordinates": [[0, 50], [100, 50]]},
+                 "width_m": 20, "function": "kdw"},
+            ],
+            "greenery_polygons": [_rect(60, 0, 30, 100)],
+        }
+    )
+    metrics = masterplan_metrics(proposal, PARCEL, INDICATORS, registry=registry)
+    z = metrics.zestawienie
+    # Documented component semantics unchanged (no silent renumbering)…
+    assert z["drogi_i_utwardzenia_m2"] == pytest.approx(2000.0)
+    assert metrics.pbc["greenery_m2"] == pytest.approx(3000.0)
+    assert z["pbc_m2"] == pytest.approx(3000.0)
+    # …and the double-counted ground area is machine-readable + warned.
+    assert z["overlap_m2"] == pytest.approx(600.0, abs=1.0)
+    assert z["basis"]["overlap_m2"] == "geometry_measured"
+    assert any("zestawienie" in w and "600.00" in w for w in metrics.warnings)
+
+
+def test_zestawienie_overlap_zero_when_disjoint(golden_metrics) -> None:
+    """Disjoint golden components → overlap_m2 == 0 and NO overlap warning."""
+    assert golden_metrics.zestawienie["overlap_m2"] == 0.0
+    assert not any("zestawienie" in w for w in golden_metrics.warnings)
+
+
+# --------------------------------------------------------------------------- #
 # Parking: missing MPZP indicator → unknown + question, never a default
 # --------------------------------------------------------------------------- #
 def test_missing_parking_indicator_is_unknown_not_default(registry) -> None:

@@ -933,6 +933,12 @@ def report_generate(
       the model JSON land in the ArtifactStore (``resource_link``, never
       inlined). PDF needs the weasyprint system stack — when absent, the
       result is an honest ``pdf_unavailable`` with the reason (never a fake).
+    * ``pzt-draft`` (Phase 15) → the PZT draft package per Dz.U. 2020 poz. 1609
+      (t.j. 2022 poz. 1679) §13–18: część opisowa (§14, MD+JSON), część
+      rysunkowa (§15, scaled vector SVG + PDF via the matplotlib PDF backend,
+      e-form naming ``PZT_rrrr.mm.dd``), and the honest §13–18 checklist
+      (done/missing/requires_projektant/requires_uprawnienia). ALWAYS carries
+      the draft-not-projekt-budowlany disclaimer (§15.4).
 
     ``audience`` (F-0392, F-0403–F-0406: ``architect | investor | lawyer |
     bank``) selects the report SECTION LIST for md/html/pdf/koncepcja — same
@@ -942,6 +948,12 @@ def report_generate(
 
     if fmt == "koncepcja":
         return _report_koncepcja(analysis_id, variant_id, audience=audience)
+
+    if fmt in ("pzt-draft", "pzt_draft"):
+        # Phase 15: the PZT draft package (§13–18 Dz.U. 2020/1609 t.j. 2022/1679)
+        # — opisowa MD+JSON, rysunkowa SVG+vector PDF, §13–18 checklist. Same
+        # report_generate tool, new format value (tool surface stays frozen).
+        return _report_pzt_draft(analysis_id, variant_id)
 
     if fmt in ("html", "pdf"):
         return _report_model_format(analysis_id, fmt, variant_id, audience)
@@ -1011,7 +1023,7 @@ def report_generate(
         "status": "unsupported_format",
         "note": (
             "Obsługiwane formaty raportu: md | html | pdf | json | png | "
-            "koncepcja (GIS/CAD przez export_layers)."
+            "koncepcja | pzt-draft (GIS/CAD przez export_layers)."
         ),
     }
 
@@ -1356,6 +1368,225 @@ def _report_model_format(
         "byte_size": len(pdf_bytes),
         "status": "rendered",
         "note": "PDF wyrenderowany przez weasyprint z TEGO SAMEGO HTML/modelu (§31).",
+    }
+
+
+def _pzt_spot_elevations(site_context: Any, parcel: Any, variant: Any) -> list[dict[str, float]]:
+    """Rzędne terenu samples for the PZT rysunkowa (Phase 15 §15.1.3).
+
+    Samples the STORED Phase 12 terrain grids (``TerrainAnalysis.elevation_at``)
+    at the parcel exterior corners + every building footprint corner. Returns an
+    EMPTY list when no terrain context exists or no sample hits the raster — the
+    drawing then carries the honest omission note and the checklist flips the
+    rzędne item to ``missing`` (never silently dropped, plan §15.3).
+    """
+    terrain = getattr(site_context, "terrain", None) if site_context is not None else None
+    if terrain is None or getattr(terrain, "status", "no_data") != "ok":
+        return []
+    from shapely.geometry import shape as _shape
+
+    points: list[tuple[float, float]] = []
+    if parcel is not None and parcel.geom_type == "Polygon":
+        points.extend((float(x), float(y)) for x, y in list(parcel.exterior.coords)[:-1])
+    for record in getattr(variant, "buildings", []) or []:
+        geometry = getattr(record, "geometry", None)
+        if geometry is None:
+            continue
+        geom = _shape(geometry)
+        if geom.geom_type != "Polygon":
+            continue
+        points.extend((float(x), float(y)) for x, y in list(geom.exterior.coords)[:-1])
+    spots: list[dict[str, float]] = []
+    for x, y in points:
+        z = terrain.elevation_at(x, y)
+        if z is not None:
+            spots.append({"x": x, "y": y, "z": round(float(z), 2)})
+    return spots
+
+
+def _report_pzt_draft(analysis_id: str | None, variant_id: str | None) -> dict[str, Any]:
+    """``report_generate(format="pzt-draft")`` — the Phase 15 PZT draft package.
+
+    Assembles, from STORED data only (no recomputation):
+
+    * **część opisowa** (§14) — MD + structured JSON from ONE ``PztOpisowa``
+      model: variant + the capacity-engine zestawienie powierzchni stored in the
+      variant metadata (single source of truth) + the Phase 12 site context
+      (BDOT10k/GESUT/constraints; honest ``data_unavailable`` when absent) + the
+      Phase 10 fire RuleChecks as evidence-backed statements;
+    * **część rysunkowa** (§15) — scaled (1:500) VECTOR SVG + PDF (matplotlib
+      PDF backend — weasyprint is not involved) with wymiary zewnętrzne,
+      kondygnacje, sieci (where known), układ komunikacyjny (function-tagged,
+      incl. drogi pożarowe), zieleń and rzędne terenu from the Phase 12 NMT
+      (honest omission note when terrain is absent); file named per the e-form
+      załącznik convention ``PZT_{rrrr.mm.dd}_{analysis_id}.pdf``;
+    * **§13–18 checklist** — done / missing / requires_projektant /
+      requires_uprawnienia with reasons.
+
+    The result and every artifact carry the MANDATORY draft-not-PB disclaimer
+    (anti-pattern §15.4, test-enforced). Artifacts land in the ArtifactStore
+    under ``analysis/{aid}/export/`` and travel as resource links (NFR-PERF-009).
+    """
+    import json as _json
+    from datetime import date as _date
+
+    from plot_agent.analysis import DEFAULT_SITE_CONTEXT_STORE
+    from plot_agent.drawing import DEFAULT_VARIANT_STORE
+    from plot_reports import (
+        PZT_DISCLAIMER,
+        build_pzt_checklist,
+        build_pzt_opisowa,
+        get_artifact_store,
+        render_pzt_opisowa_json,
+        render_pzt_opisowa_markdown,
+        render_pzt_rysunkowa,
+    )
+    from plot_reports.pzt import pzt_filename
+
+    aid = analysis_id or ADHOC_ANALYSIS_ID
+    # Variant resolution — same semantics as the koncepcja path (F1): explicit
+    # variant_id honoured as-is; otherwise only THIS analysis' latest variant.
+    variant = (
+        DEFAULT_VARIANT_STORE.get(variant_id)
+        if variant_id
+        else DEFAULT_VARIANT_STORE.latest(analysis_id=aid)
+    )
+    if variant is None:
+        return {
+            "analysis_id": analysis_id,
+            "format": "pzt-draft",
+            "variant_id": variant_id,
+            "status": "not_found",
+            "note": (
+                "Brak zapisanego wariantu masterplanu — pakiet PZT powstaje z "
+                "ZAAKCEPTOWANEGO wariantu; najpierw propose_layout (DSL v2)."
+            ),
+        }
+    metadata = variant.metadata if isinstance(variant.metadata, dict) else {}
+
+    # Parcel geometry: the bound analysis' geometry, else the drawing context —
+    # a BOUND variant whose analysis vanished is a hard error (same rule as the
+    # koncepcja path; rendering PZT on sample geometry would misrepresent, §21).
+    if bool(metadata.get("analysis_bound")) and variant.analysis_id is not None:
+        context = _analysis_drawing_context(variant.analysis_id)
+        if context is None:
+            raise ValueError(
+                f"Wariant '{variant.id}' jest związany z analizą "
+                f"'{variant.analysis_id}', której nie ma w magazynie analiz albo "
+                "nie ma geometrii działki — pakiet PZT nie może użyć geometrii "
+                "przykładowej; ponownie uruchom parcel_analyze."
+            )
+    else:
+        context = _drawing_context()
+    parcel_geom = context.parcel_geom()
+
+    # Site context: the stored analysis' serialized block, else the typed store's
+    # serialization (test seam) — None stays None (honest data_unavailable).
+    owner_aid = variant.analysis_id or aid
+    stored = DEFAULT_STORE.get(owner_aid)
+    site_dict: dict[str, Any] | None = None
+    if stored is not None and isinstance(stored.planning, dict):
+        raw = stored.planning.get("_site_context")
+        if isinstance(raw, dict):
+            site_dict = raw
+    typed_site = DEFAULT_SITE_CONTEXT_STORE.get(owner_aid)
+    if site_dict is None and typed_site is not None:
+        site_dict = typed_site.to_dict()
+
+    generated_at = _now()
+    opisowa = build_pzt_opisowa(
+        analysis_id=aid,
+        variant=variant,
+        generated_at=generated_at.isoformat(),
+        zestawienie=metadata.get("zestawienie_powierzchni"),
+        site_context=site_dict,
+        inter_building_checks=list(metadata.get("inter_building_checks") or []),
+    )
+    opisowa_md = render_pzt_opisowa_markdown(opisowa)
+    opisowa_json = render_pzt_opisowa_json(opisowa)
+
+    # Rysunkowa inputs from STORED data: GESUT networks (serialized utilities)
+    # + NMT spot elevations from the typed terrain grids (honest [] when absent).
+    networks = [
+        {"network_type": u.get("network_type"), "geometry": u.get("geometry")}
+        for u in ((site_dict or {}).get("access") or {}).get("utilities") or []
+        if u.get("geometry")
+    ]
+    spots = _pzt_spot_elevations(typed_site, parcel_geom, variant)
+    generated_on = _date(generated_at.year, generated_at.month, generated_at.day)
+    drawing = render_pzt_rysunkowa(
+        variant,
+        parcel_geom,
+        analysis_id=aid,
+        generated_on=generated_on,
+        investor=None,  # never invented (§21) — title block prints the placeholder
+        networks=networks,
+        spot_elevations=spots,
+        building_lines=None,  # no geometric linia-zabudowy source wired (honest)
+    )
+    checklist = build_pzt_checklist(opisowa, drawing.metadata)
+
+    store = get_artifact_store()
+    # Review F1: the e-form stem (PZT_{rrrr.mm.dd}_{analysis_id}) is shared by
+    # ALL variants of an analysis on a given day, and LocalArtifactStore.put
+    # silently overwrites — storage keys therefore carry the slugged variant id
+    # (the koncepcja convention: ``koncepcja-{variant.id}``) so two variants'
+    # drafts never clobber each other. The response's ``pdf_filename`` keeps
+    # the pure e-form convention name (the file name the projektant submits).
+    stem = drawing.filename_stem  # PZT_{rrrr.mm.dd}_{analysis_id}
+    key_stem = f"{stem}-{variant.id.replace(':', '-')}"
+    base_key = f"analysis/{aid}/export"
+    md_uri = store.put(
+        f"{base_key}/{key_stem}-opisowa.md", opisowa_md.encode("utf-8"), "text/markdown"
+    )
+    opisowa_json_uri = store.put(
+        f"{base_key}/{key_stem}-opisowa.json",
+        _json.dumps(opisowa_json, ensure_ascii=False, indent=2).encode("utf-8"),
+        "application/json",
+    )
+    svg_uri = store.put(f"{base_key}/{key_stem}.svg", drawing.svg, "image/svg+xml")
+    pdf_uri = store.put(f"{base_key}/{key_stem}.pdf", drawing.pdf, "application/pdf")
+    checklist_uri = store.put(
+        f"{base_key}/{key_stem}-checklist.json",
+        _json.dumps(checklist, ensure_ascii=False, indent=2).encode("utf-8"),
+        "application/json",
+    )
+
+    return {
+        "analysis_id": aid,
+        "format": "pzt-draft",
+        "variant_id": variant.id,
+        "status": "rendered",
+        # MANDATORY + prominent (anti-pattern §15.4, test-enforced).
+        "disclaimer": PZT_DISCLAIMER,
+        "is_projekt_budowlany": False,
+        "checklist": checklist,
+        "opisowa_sections": [
+            {"id": s.id, "title": s.title, "status": s.status} for s in opisowa.sections
+        ],
+        "zestawienie_powierzchni": opisowa.zestawienie,
+        "rysunkowa_metadata": drawing.metadata,
+        "pdf_filename": pzt_filename(generated_on, aid, "pdf"),
+        "artifacts": {
+            "opisowa_md": md_uri,
+            "opisowa_json": opisowa_json_uri,
+            "rysunkowa_svg": svg_uri,
+            "rysunkowa_pdf": pdf_uri,
+            "checklist_json": checklist_uri,
+        },
+        "resource_links": {
+            "opisowa_md": f"analysis://{aid}/export/{key_stem}-opisowa.md",
+            "opisowa_json": f"analysis://{aid}/export/{key_stem}-opisowa.json",
+            "rysunkowa_svg": f"analysis://{aid}/export/{key_stem}.svg",
+            "rysunkowa_pdf": f"analysis://{aid}/export/{key_stem}.pdf",
+            "checklist_json": f"analysis://{aid}/export/{key_stem}-checklist.json",
+        },
+        "note": (
+            "Pakiet PZT (szkic) zestawiony z zapisanych danych: opisowa §14 "
+            "(MD+JSON), rysunkowa §15 (SVG + PDF wektorowy, skala 1:500, "
+            "nazewnictwo e-formy), checklista §13–18. TO NIE JEST projekt "
+            "budowlany — patrz disclaimer."
+        ),
     }
 
 
@@ -2539,6 +2770,7 @@ def _propose_masterplan_render(
         MasterplanProposal,
     )
     from plot_domain import BuildingRecord, MasterplanVariant
+    from plot_planning import CapacityConfig, building_storeys
     from plot_reports import RenderResult, get_artifact_store
     from plot_rules import DEFAULT_OVERRIDE_STORE
     from shapely.geometry import mapping
@@ -2646,6 +2878,11 @@ def _propose_masterplan_render(
                 status=building.status,
                 underground_floors=building.underground_floors,
                 metrics=bm.to_dict(),
+                # Phase 15 Task 1: storeys filled from the DSL floors at
+                # variant-store time — SAME CapacityConfig the metrics used
+                # (DrawingLoop.iterate_masterplan passes CapacityConfig()), so
+                # the basis-marked storey heights match the metrics basis block.
+                storeys=building_storeys(building, CapacityConfig()),
             )
             for i, (building, bm) in enumerate(
                 zip(proposal.buildings, metrics.per_building, strict=True)
@@ -2676,6 +2913,10 @@ def _propose_masterplan_render(
             # koncepcja report assembles without recomputation.
             "unknowns": unknowns_json,
             "critique": crit.to_dict(),
+            # Phase 15: the capacity-engine zestawienie powierzchni travels with
+            # the variant so the PZT opisowa renders THE SAME numbers (single
+            # source of truth — anti-pattern §15.4, test-enforced equality).
+            "zestawienie_powierzchni": metrics.zestawienie,
             # Lineage pointer (F1): the previous iteration of the SAME analysis
             # (the audit entry that seeded previous_components), None for the first.
             "parent_variant_id": parent_variant_id,

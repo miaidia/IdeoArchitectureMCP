@@ -51,6 +51,7 @@ from plot_planning.capacity import (
     CapacityScenarioSet,
     MasterplanMetrics,
     building_metrics,
+    building_storeys,
     generate_capacity_scenarios,
     masterplan_metrics,
 )
@@ -112,6 +113,7 @@ __all__ = [
     "ZoneCoverage",
     "analyze_frontages",
     "building_metrics",
+    "building_storeys",
     "check_staging",
     "composition_axes",
     "detect_conflicts",
