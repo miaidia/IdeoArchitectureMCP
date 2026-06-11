@@ -21,6 +21,7 @@ dependencies = [
     # Phase 9 capacity engine: legal values (WT §39/§40 thresholds + brackets) are READ
     # from the ruleset registry via the plot_rules engine — never hardcoded here.
     "plot-rules",
+    "pvlib>=0.15.1",
 ]
 
 [tool.uv.sources]

@@ -47,6 +47,9 @@ class LayerRole(str, Enum):
     PLAYGROUND = "playground"
     GREENERY = "greenery"
     RETENTION = "retention"
+    # Phase 10: failing inter-building rule-check evidence (WT/ppoż) drawn as a red
+    # overlay ON TOP of every other layer (plan §10.1.7 violation overlay).
+    VIOLATION = "violation"
 
 
 def _to_shapely(geom: GeometryLike) -> BaseGeometry:

@@ -160,8 +160,17 @@ async def test_propose_layout_masterplan_returns_metrics_and_variant(
         sc = result.structuredContent
         assert sc is not None
         assert sc["schema_version"] == 2
-        assert sc["valid"] is True
-        assert sc["violations"] == []
+        # Phase 10: the inter-building WT/ppoż validators now run in this path and
+        # this fixture is NOT WT-compliant (7-kond. wing without a fire road, the
+        # zabytek 4 m away → §271/§13, parking 2 m from windows → §19) — the
+        # truthful outcome is valid=False with rule-id-bearing violations (§14.2).
+        # The Phase 9 invariants under test (metrics + variant resource) still hold.
+        assert sc["valid"] is False
+        assert any(
+            v["kind"] == "inter_building_rule" and "PL-" in v["detail"]
+            for v in sc["violations"]
+        )
+        assert sc["inter_building_checks"], "WT/ppoż rule outcomes are returned"
         # Capacity metrics with basis metadata (anti-pattern §0v2.4 guard).
         totals = sc["metrics"]["totals"]
         assert totals["buildings"] == 2

@@ -124,6 +124,9 @@ module = [
     # Phase 6 connector stack — owslib has no py.typed; redis is an optional lazy import.
     "owslib.*",
     "redis.*",
+    # Phase 10 sun engine (wt_validators §60) — pvlib/pandas ship no stubs here.
+    "pvlib.*",
+    "pandas.*",
 ]
 ignore_missing_imports = true
 

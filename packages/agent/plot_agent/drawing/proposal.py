@@ -64,6 +64,35 @@ ParkingKind = Literal["naziemny", "hala_podziemna", "wbudowany"]
 _MAX_EXTENT_M = 10_000.0
 _MAX_ABS_COORD = 10_000_000.0
 
+# Degenerate-edge epsilon of the wall-plane index space — MUST mirror
+# ``plot_planning.wt_validators.context._MIN_EDGE_LEN_M`` (the §12 wall
+# decomposition skips such edges WITHOUT consuming an index; plot_planning may
+# not be imported here — dependency direction §9.4).
+_MIN_WALL_EDGE_LEN_M = 1e-6
+
+
+def _wall_edge_count(geom: BaseGeometry) -> int:
+    """Number of wall-plane edge indices of a composed segment footprint.
+
+    Mirrors the index space of ``plot_planning.wt_validators.context
+    .segment_walls``: ring edges of every polygon — exterior ring(s) first,
+    then interior (courtyard) rings — with degenerate (≤ epsilon) edges
+    consuming no index. ``BuildingSegment.windowed_walls`` indices must lie in
+    ``[0, count)`` or window declarations would silently be dropped (m4).
+    """
+    if geom.geom_type == "Polygon":
+        polys = [geom]
+    else:
+        polys = [g for g in getattr(geom, "geoms", []) if g.geom_type == "Polygon"]
+    count = 0
+    for poly in polys:
+        for ring in [poly.exterior, *poly.interiors]:
+            coords = list(ring.coords)
+            for (x1, y1), (x2, y2) in zip(coords, coords[1:], strict=False):
+                if math.hypot(x2 - x1, y2 - y1) > _MIN_WALL_EDGE_LEN_M:
+                    count += 1
+    return count
+
 
 def _check_finite_metric(geom: BaseGeometry, *, what: str) -> None:
     """Finite-coordinate + metric-plausibility guard (Phase 9 §9.1.5 ingest validation)."""
@@ -212,13 +241,45 @@ class BuildingSegment(BaseModel):
         default=None,
         description="Parter use when it differs from `use` (e.g. usługi w parterze).",
     )
+    # Phase 10 DSL addendum (plan §10.1.1): which wall planes carry windows/doors.
+    # Edge indices are 0-based and enumerate the composed segment polygon's
+    # exterior-ring edges first, then interior-ring (courtyard) edges, in the
+    # canonical orientation produced by ``plot_planning.wt_validators`` wall
+    # decomposition (per Dz.U. 2024/726: każda płaszczyzna po załamaniu/uskoku =
+    # oddzielna ściana). ``None`` (default) means ALL walls are treated as
+    # windowed — the CONSERVATIVE assumption (stricter §12 distances, more §13/§60
+    # windows to protect); validators then mark ``assumed_windowed: true`` in
+    # their evidence because the windowed set was assumed, not declared — a
+    # model-declared list is never trusted blindly for compliance claims (§10.4).
+    windowed_walls: list[int] | None = Field(
+        default=None,
+        description=(
+            "0-based edge indices of this segment's wall planes that have windows/"
+            "doors; None = all walls windowed (conservative default, marked "
+            "assumed_windowed in validator evidence)."
+        ),
+    )
 
     @model_validator(mode="after")
     def _validate_geometry(self) -> BuildingSegment:
         if self.polygon is None and not self.rectangles:
             raise ValueError("BuildingSegment needs either rectangles or a GeoJSON polygon.")
+        if self.windowed_walls is not None and any(i < 0 for i in self.windowed_walls):
+            raise ValueError("BuildingSegment.windowed_walls: edge indices must be >= 0.")
         # Ingest validation runs ONCE at parse time (make_valid / finite / metric bounds).
-        self.geometry()
+        geom = self.geometry()
+        # m4: an index past the composed footprint's wall-plane edge count would
+        # never match a wall — every wall would silently become windowless
+        # (weaker §12 bracket, no §13/§60 window protections). Reject loudly.
+        if self.windowed_walls:
+            edge_count = _wall_edge_count(geom)
+            out_of_range = sorted({i for i in self.windowed_walls if i >= edge_count})
+            if out_of_range:
+                raise ValueError(
+                    f"BuildingSegment.windowed_walls: indices {out_of_range} out of "
+                    f"range — this segment's composed footprint decomposes into "
+                    f"{edge_count} wall-plane edges (valid indices 0..{edge_count - 1})."
+                )
         return self
 
     def geometry(self) -> BaseGeometry:

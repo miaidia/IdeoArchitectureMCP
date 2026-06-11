@@ -497,12 +497,44 @@ def planning_parse_document(
     }
 
 
+def _inter_building_rules_summary(ruleset_dir: str = "rulesets/PL") -> dict[str, Any]:
+    """The Phase 10 inter-building WT/ppoż rules in force (plan §10.1.7).
+
+    ``constraints_compute`` exposes WHICH rules the masterplan validators enforce
+    (id + title + Dz.U. citation, freshly loaded — hot-reload semantics); the
+    CHECKS themselves need a concrete masterplan proposal, so they are evaluated
+    in the ``propose_layout`` masterplan path (and travel with the stored variant).
+    """
+    from plot_planning.wt_validators import CONSUMED_RULE_IDS
+    from plot_rules import load_rulesets
+
+    registry = load_rulesets(ruleset_dir)
+    rules = []
+    for rule_id in CONSUMED_RULE_IDS:
+        rule = registry.get(rule_id)
+        rules.append(
+            {
+                "rule_id": rule_id,
+                "loaded": rule is not None,
+                "title": rule.title if rule else None,
+                "severity": rule.severity if rule else None,
+                "source_reference": rule.source_reference if rule else None,
+            }
+        )
+    return {
+        "rules": rules,
+        "ruleset_version": registry.ruleset_version,
+        "evaluated_by": "propose_layout (masterplan path, Phase 10 wt_validators)",
+    }
+
+
 def constraints_compute(analysis_id: str | None) -> dict[str, Any]:
     """Return the real constraints + buildable envelope from a stored analysis (Phase 7).
 
     The heavy geometry (envelope GeoJSON) is exposed via the
     ``analysis://{id}/buildable-envelope.geojson`` resource (NFR-PERF-009); this tool
-    returns the constraint records + an envelope summary (area / confidence / lir present).
+    returns the constraint records + an envelope summary (area / confidence / lir
+    present) + the Phase 10 inter-building WT/ppoż rules in force (§10.1.7).
     """
     result = DEFAULT_STORE.get(analysis_id) if analysis_id else None
     if result is None:
@@ -523,6 +555,7 @@ def constraints_compute(analysis_id: str | None) -> dict[str, Any]:
             "geojson_resource": f"analysis://{analysis_id}/buildable-envelope.geojson",
             "removed_by": env.metadata.get("removed_by", []) if env and isinstance(env.metadata, dict) else [],
         },
+        "inter_building_rules": _inter_building_rules_summary(),
     }
 
 
@@ -822,6 +855,13 @@ def monitoring_create(scope: str, target_id: str, purpose: str) -> dict[str, Any
     }
 
 
+#: The analysis id the masterplan path of ``propose_layout`` evaluates under —
+#: the ONLY production consumer of the OverrideStore until propose_layout is
+#: analysis-bound (Phase 12). ``manual_override`` may honestly report
+#: ``applied``/``active`` only for overrides recorded under this id (§21).
+ADHOC_ANALYSIS_ID = "adhoc"
+
+
 def manual_override(
     analysis_id: str,
     target_type: str,
@@ -833,13 +873,25 @@ def manual_override(
     """Expert override with audit trail (Phase 8, F-0137/0138; NFR-AUD-003).
 
     Creates an audited :class:`~plot_domain.Override` record in the
-    :data:`plot_rules.DEFAULT_OVERRIDE_STORE`. The record is RECORDED, not yet
-    applied: no production evaluation path consumes the store yet, so the tool
-    reports ``applied=False`` / ``status="recorded"`` honestly (§21).
-    ``after`` must explicitly carry a valid new ``status`` — NOTHING is
-    defaulted (§21) and an invalid status is rejected at the tool boundary.
+    :data:`plot_rules.DEFAULT_OVERRIDE_STORE`. Since Phase 10 the inter-building
+    validators (:func:`plot_planning.wt_validators.run_inter_building_checks`)
+    CONSUME the store. ``target_id`` is either a bare consumed WT/ppoż rule id
+    (the override applies RULE-WIDE — every building/pair of the rule; recorded
+    as ``scope: rule-wide`` in the audit) or ``"<rule_id>#<subject>"`` scoping
+    it to ONE evaluation subject (a building name; ``"pair:A|B"`` with names
+    sorted for the pairwise §271 evaluation; ``"parking:N"`` for §19).
+
+    §21 honesty (two conditions for ``applied=True`` / ``status="active"``):
+    the rule must be consumed by the Phase 10 validators AND ``analysis_id``
+    must actually be queried by a production path — that is
+    :data:`ADHOC_ANALYSIS_ID` (``"adhoc"``) until ``propose_layout`` becomes
+    analysis-bound (Phase 12). Anything else is ``recorded`` with a note
+    explaining when it will activate. ``after`` must explicitly carry a valid
+    new ``status`` — NOTHING is defaulted (§21) and an invalid status is
+    rejected at the tool boundary.
     """
-    from plot_rules import DEFAULT_OVERRIDE_STORE, RuleStatus
+    from plot_planning.wt_validators import CONSUMED_RULE_IDS
+    from plot_rules import DEFAULT_OVERRIDE_STORE, RuleStatus, override_subject
 
     def _rejected(note: str) -> dict[str, Any]:
         return {
@@ -885,10 +937,44 @@ def manual_override(
         created_at=_now(),
     )
     DEFAULT_OVERRIDE_STORE.put(override)
-    # TODO(Phase 10): the validator evaluation path will read DEFAULT_OVERRIDE_STORE
-    # and pass the matching record into plot_rules.evaluate (override hook). Until
-    # that wiring exists the override is recorded + audited but consumed by no
-    # production path — so this tool must NOT claim "applied" (§21).
+    # Phase 10: the wt_validators evaluation path consumes DEFAULT_OVERRIDE_STORE
+    # (matched by analysis_id + rule_id [+ subject] → plot_rules.evaluate
+    # override hook, F-0137) for the inter-building WT/ppoż rules. applied/active
+    # may ONLY be claimed when BOTH the rule is consumed AND the analysis_id is
+    # actually queried by a production path — propose_layout evaluates under
+    # ADHOC_ANALYSIS_ID until it is analysis-bound (Phase 12). Anything else is
+    # recorded-but-not-yet-consumable (§21 honesty).
+    rule_part, _, _ = target_id.partition("#")
+    subject = override_subject(target_id)
+    consumed_rule = rule_part in CONSUMED_RULE_IDS
+    analysis_consumable = analysis_id == ADHOC_ANALYSIS_ID
+    applied = consumed_rule and analysis_consumable
+    scope = f"subject:{subject}" if subject else "rule-wide"
+    if applied:
+        note = (
+            "Override zapisany z pełnym audytem (F-0138) i AKTYWNY "
+            f"(zakres: {scope}): walidatory między-budynkowe Phase 10 konsumują "
+            "OverrideStore dla tej reguły pod analysis_id='adhoc' — jedyną "
+            "ścieżką produkcyjną do czasu powiązania propose_layout z analizą "
+            "(Phase 12). Wynik nadpisany przy najbliższej ewaluacji, z audytem "
+            "w trace; override bez sufiksu '#podmiot' obejmuje CAŁĄ regułę "
+            "(rule-wide)."
+        )
+    elif consumed_rule:
+        note = (
+            "Override zapisany z pełnym audytem (F-0138), ale jeszcze NIE "
+            f"konsumowany: jedyna ścieżka produkcyjna (propose_layout) ewaluuje "
+            f"pod analysis_id='{ADHOC_ANALYSIS_ID}', a ten override dotyczy "
+            f"analysis_id='{analysis_id}'. Aktywuje się, gdy ewaluacja zostanie "
+            "powiązana z tym analysis_id (propose_layout analysis-bound — "
+            "Phase 12) — applied=False (§21)."
+        )
+    else:
+        note = (
+            "Override zapisany z pełnym audytem (F-0138), ale ta reguła nie jest "
+            "konsumowana przez żadną ścieżkę produkcyjną (Phase 10 obejmuje "
+            "reguły WT/ppoż między-budynkowe) — applied=False (§21)."
+        )
     return {
         "override_id": override.id,
         "analysis_id": analysis_id,
@@ -896,16 +982,12 @@ def manual_override(
         "target_id": target_id,
         "reason": reason,
         "user_id": user_id,
-        "applied": False,
+        "applied": applied,
         "audit_logged": True,
-        "status": "recorded",
+        "status": "active" if applied else "recorded",
+        "scope": scope,
         "audit": override.model_dump(mode="json"),
-        "note": (
-            "Override zapisany z pełnym audytem (F-0138), ale jeszcze NIE "
-            "zastosowany: ścieżka ewaluacji reguł zacznie konsumować OverrideStore "
-            "wraz z walidatorami Phase 10 (plot_rules.evaluate override hook, "
-            "F-0137). Do tego czasu applied=False (§21)."
-        ),
+        "note": note,
     }
 
 
@@ -1019,13 +1101,21 @@ def _propose_masterplan_render(
     proposal_payload: dict[str, Any],
     indicators: dict[str, Any] | list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Masterplan path of ``propose_layout`` (Phase 9 §9.1): ingest-validate →
-    capacity metrics → renderer v2 → score (hard-blocker dominance) → variant store.
+    """Masterplan path of ``propose_layout`` (Phase 9 §9.1 + Phase 10 §10.1.7):
+    ingest-validate → capacity metrics → inter-building WT/ppoż validators →
+    renderer v2 (violation overlay) → score (hard-blocker dominance) → variant store.
 
-    ``inter_building_checks`` is passed EMPTY — the Phase 10 WT validators plug in
-    there. Variant metrics are stored in :data:`plot_agent.drawing.DEFAULT_VARIANT_STORE`
-    and served by the ``analysis://{analysis_id}/masterplan/{variant_id}/metrics.json``
-    resource (and embedded in the tool result for convenience).
+    The Phase 10 validators (:func:`plot_planning.wt_validators
+    .run_inter_building_checks`) evaluate WT §12/§13/§19/§39/§40/§60 + ppoż over the
+    proposal against the loaded ruleset registry; FAILING hard checks become hard
+    violations in :func:`score_masterplan` (§14.2 dominance) and their
+    ``geometry_evidence`` is rendered as the red top-z-order violation overlay.
+    Audited expert overrides from :data:`plot_rules.DEFAULT_OVERRIDE_STORE` are
+    consumed under the ``"adhoc"`` analysis id (propose_layout is not yet
+    analysis-bound — Phase 12). Variant metrics are stored in
+    :data:`plot_agent.drawing.DEFAULT_VARIANT_STORE` and served by the
+    ``analysis://{analysis_id}/masterplan/{variant_id}/metrics.json`` resource (and
+    embedded in the tool result for convenience).
     """
     from plot_agent.drawing import (
         DEFAULT_VARIANT_STORE,
@@ -1036,28 +1126,52 @@ def _propose_masterplan_render(
     from plot_agent.drawing.loop import DEFAULT_ACCEPTANCE_THRESHOLD
     from plot_domain import BuildingRecord, MasterplanVariant
     from plot_planning import CapacityConfig, masterplan_metrics
+    from plot_planning.wt_validators import run_inter_building_checks
     from plot_reports import get_artifact_store, render_masterplan
+    from plot_rules import DEFAULT_OVERRIDE_STORE, RuleStatus
     from shapely.geometry import mapping
 
     context = _drawing_context()
     # Ingest validation (make_valid / finite coords / EPSG:2180 plausibility) runs in
     # the Pydantic validators; buildings-within-parcel is a SCORING-time violation.
     proposal = MasterplanProposal.model_validate(proposal_payload)
+    indicator_map = _indicator_map(indicators)
     metrics = masterplan_metrics(
         proposal,
         context.parcel_geom(),
-        _indicator_map(indicators),
+        indicator_map,
         config=CapacityConfig(),
         registry=context.ruleset,
     )
-    # Phase 10 hook: inter_building_checks stays EMPTY until the WT validators land.
-    score = score_masterplan(proposal, context, metrics, inter_building_checks=[])
+    # Phase 10: inter-building WT/ppoż validators (thresholds from the ruleset
+    # registry; Phase 9 metrics REUSED, not recomputed; overrides consumed audited).
+    checks = run_inter_building_checks(
+        proposal,
+        context.parcel_geom(),
+        context.ruleset,
+        srodmiejska=proposal.zabudowa_srodmiejska,
+        overrides=DEFAULT_OVERRIDE_STORE,
+        analysis_id=ADHOC_ANALYSIS_ID,
+        metrics=metrics,
+        indicators=indicator_map,
+    )
+    checks_json = [c.model_dump(mode="json") for c in checks]
+    score = score_masterplan(proposal, context, metrics, inter_building_checks=checks)
     crit = critique(proposal, score)
+    # Failing checks' geometry evidence → red top-z-order violation overlay (§10.1.7).
+    violation_geoms = [
+        c.geometry_evidence["geometry"]
+        for c in checks
+        if c.status is RuleStatus.FAIL
+        and c.geometry_evidence
+        and c.geometry_evidence.get("geometry")
+    ]
     render = render_masterplan(
         proposal,
         context.parcel_geom(),
         metrics=metrics,
         envelope=context.envelope_geom(),
+        violations=violation_geoms or None,
     )
 
     variant_id = f"mvar:{uuid.uuid4().hex[:8]}"
@@ -1091,6 +1205,9 @@ def _propose_masterplan_render(
             "config_basis": metrics.config_basis,
             "ruleset_version": context.ruleset.ruleset_version,
             "zabudowa_srodmiejska": proposal.zabudowa_srodmiejska,
+            # Phase 10: the WT/ppoż rule outcomes travel with the stored variant
+            # (served by the metrics.json resource — full trace + evidence).
+            "inter_building_checks": checks_json,
         },
     )
     DEFAULT_VARIANT_STORE.put(variant)
@@ -1106,6 +1223,7 @@ def _propose_masterplan_render(
         "valid": score.valid,
         "accepted": accepted,
         "violations": [v.to_dict() for v in score.violations],
+        "inter_building_checks": checks_json,
         "artifact_uri": artifact_uri,
     }
     return {
@@ -1122,11 +1240,17 @@ def _propose_masterplan_render(
         "variant_id": variant_id,
         "metrics": metrics.to_dict(),
         "unknowns": [u.model_dump(mode="json") for u in metrics.unknowns],
-        "metrics_resource": f"analysis://adhoc/masterplan/{variant_id}/metrics.json",
+        "metrics_resource": f"analysis://{ADHOC_ANALYSIS_ID}/masterplan/{variant_id}/metrics.json",
+        # Phase 10: full WT/ppoż rule outcomes (trace + geometry evidence) + the
+        # render's style-metadata sidecar (the violation overlay layer is auditable
+        # there too — NFR-AUD-009; persisted at <artifact>.style.json).
+        "inter_building_checks": checks_json,
+        "style_metadata": render.style_metadata,
         "note": (
             "Masterplan DSL v2: walidacja twardych ograniczeń PRZED punktacją (§14.2); "
-            "metryki chłonności z basis-metadanymi; walidatory między-budynkowe (WT/ppoż) "
-            "wpinają się w Phase 10 (inter_building_checks)."
+            "metryki chłonności z basis-metadanymi; walidatory między-budynkowe WT/ppoż "
+            "(Phase 10) ocenione z progami z rulesetów — FAIL na regule twardej = hard "
+            "violation, geometria naruszeń w czerwonej warstwie overlay."
         ),
     }
 

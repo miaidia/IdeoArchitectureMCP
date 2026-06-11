@@ -480,4 +480,8 @@ def test_rulecheck_model_shape() -> None:
         "trace",
         "source_reference",
         "confidence",
+        # Phase 10: optional GeoJSON evidence attached by the wt_validators —
+        # backwards-compatible (default None; the engine itself never fills it).
+        "geometry_evidence",
     }
+    assert payload["geometry_evidence"] is None

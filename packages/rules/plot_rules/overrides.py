@@ -37,6 +37,23 @@ class OverrideStore:
                     return override
         return None
 
+    def for_rule(
+        self, analysis_id: str, rule_id: str, subject: str | None = None
+    ) -> Override | None:
+        """Latest override for ``(analysis_id, rule_id[, subject])`` (F-0137, Phase 10).
+
+        ``subject`` is the caller's evaluation subject (e.g. a building name, a
+        sorted ``"pair:A|B"`` for pairwise checks). A subject-scoped record
+        (``target_id == f"{rule_id}#{subject}"``) takes precedence; a record
+        with the bare rule id applies RULE-WIDE (every subject) — an explicit
+        choice audited as ``scope: rule-wide`` in the evaluation trace.
+        """
+        if subject is not None:
+            scoped = self.for_target(analysis_id, f"{rule_id}#{subject}")
+            if scoped is not None:
+                return scoped
+        return self.for_target(analysis_id, rule_id)
+
     def audit(self, analysis_id: str | None = None) -> list[Override]:
         """The audit trail (all overrides, or one analysis's), oldest first (F-0138)."""
         with self._lock:

@@ -162,6 +162,15 @@ _ROLE_STYLE: dict[LayerRole, dict[str, Any]] = {
         "linewidth": 1.1,
         "z_order": 8,
     },
+    # Phase 10: failing WT/ppoż rule-check evidence — red, TOP z-order so the
+    # violation overlay is always visible above buildings/roads (plan §10.1.7).
+    LayerRole.VIOLATION: {
+        "facecolor": "#ff1a1a",
+        "edgecolor": "#990000",
+        "alpha": 0.55,
+        "linewidth": 1.8,
+        "z_order": 12,
+    },
 }
 
 # Fixed canvas geometry for reproducible pixels (Phase 3 §3.4).

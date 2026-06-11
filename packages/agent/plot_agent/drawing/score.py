@@ -186,13 +186,16 @@ def score_masterplan(
     violations = validate_hard_masterplan(proposal, context)
     for check in inter_building_checks or []:
         if isinstance(check, dict):
-            status = str(check.get("status", ""))
+            status_obj: Any = check.get("status", "")
             severity = str(check.get("severity", "hard"))
             message = str(check.get("message", check))
         else:  # RuleCheck-like (Phase 10 wt_validators)
-            status = str(getattr(check, "status", ""))
+            status_obj = getattr(check, "status", "")
             severity = str(getattr(check, "severity", "hard"))
             message = str(getattr(check, "message", check))
+        # RuleCheck.status is a (str, Enum) whose str() is "RuleStatus.FAIL" — read the
+        # .value so enum-typed checks are matched exactly like plain-string dicts.
+        status = str(getattr(status_obj, "value", status_obj))
         if "fail" in status and severity == "hard":
             violations.append(Violation(kind="inter_building_rule", detail=message))
 

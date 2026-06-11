@@ -68,10 +68,34 @@ class RuleCheck(BaseModel):
     confidence: float = Field(
         default=0.0, ge=0.0, le=1.0, description="Confidence in this outcome (§25.1)."
     )
+    # Phase 10 (wt_validators): GeoJSON-bearing evidence of the checked/offending
+    # geometry, e.g. {"geometry": <GeoJSON>, "building": ..., "assumed_windowed": ...}.
+    # The engine itself never fills this — geometric validators attach it so the
+    # renderer can draw a violation overlay (plan §10.1.7). None for pure evaluations.
+    geometry_evidence: dict[str, Any] | None = Field(
+        default=None,
+        description="GeoJSON evidence of the offending geometry pair/zone (Phase 10).",
+    )
 
 
 # Internal per-check outcomes (before aggregation).
 _DECIDED = ("pass", "fail")
+
+
+def override_targets_rule(target_id: str, rule_id: str) -> bool:
+    """Does an override ``target_id`` cover ``rule_id``?
+
+    Two audited forms (F-0137, Phase 10): the bare rule id (rule-wide) and
+    ``"<rule_id>#<subject>"`` (scoped to ONE evaluation subject, e.g. a building
+    name — the caller decides which subject's evaluation receives the record).
+    """
+    return target_id == rule_id or target_id.startswith(f"{rule_id}#")
+
+
+def override_subject(target_id: str) -> str | None:
+    """The subject of a ``"<rule_id>#<subject>"`` target id (``None`` = rule-wide)."""
+    _, _, subject = target_id.partition("#")
+    return subject or None
 
 
 def _conditions_met(cond: dict[str, Any], inputs: dict[str, Any]) -> bool | None:
@@ -450,10 +474,11 @@ def evaluate(
     confidence = _confidence(rule, status, from_unknown, assumed)
 
     # Expert override hook (F-0137): applied last, fully audited (NFR-AUD-003).
-    if override is not None and override.target_id == rule.id:
+    if override is not None and override_targets_rule(override.target_id, rule.id):
         new_status = override.after_json.get("status")
         if new_status is None:
             raise ValueError(f"override {override.id} for {rule.id} carries no status")
+        subject = override_subject(override.target_id)
         trace["override"] = {
             "id": override.id,
             "user_id": override.user_id,
@@ -461,6 +486,9 @@ def evaluate(
             "before": override.before_json,
             "after": override.after_json,
             "original_status": status.value,
+            # Audited scope: an override recorded WITHOUT a subject is an
+            # explicit rule-wide choice (covers every subject of the rule).
+            "scope": f"subject:{subject}" if subject else "rule-wide",
         }
         status = RuleStatus(new_status)
         message = (

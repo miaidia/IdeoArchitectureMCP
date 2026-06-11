@@ -120,8 +120,14 @@ def masterplan_layers(
     parcel: GeometryLike,
     *,
     envelope: GeometryLike | None = None,
+    violations: list[GeometryLike] | None = None,
 ) -> tuple[list[Layer], list[MapAnnotation]]:
-    """Build the deterministic layer stack + annotations for a masterplan render."""
+    """Build the deterministic layer stack + annotations for a masterplan render.
+
+    ``violations`` (Phase 10) are the ``geometry_evidence`` geometries of FAILING
+    inter-building rule checks (WT/ppoż); they are appended as a red
+    :attr:`LayerRole.VIOLATION` layer drawn on top of everything (plan §10.1.7).
+    """
     layers: list[Layer] = [Layer(name="Działka", geometries=[parcel], role=LayerRole.PARCEL)]
     if envelope is not None:
         layers.append(
@@ -230,6 +236,15 @@ def masterplan_layers(
                 geometries=zabytek_geoms,
                 role=LayerRole.BUILDING_EXISTING,
                 style=dict(_ZABYTEK_STYLE),
+            )
+        )
+    if violations:
+        # Phase 10 violation overlay: red, top z-order (style from _ROLE_STYLE).
+        layers.append(
+            Layer(
+                name="Naruszenia reguł (WT/ppoż)",
+                geometries=list(violations),
+                role=LayerRole.VIOLATION,
             )
         )
     return layers, annotations
@@ -419,6 +434,7 @@ def render_masterplan(
     *,
     metrics: Any | None = None,
     envelope: GeometryLike | None = None,
+    violations: list[GeometryLike] | None = None,
     fmt: Fmt = "png",
     title: str | None = None,
     crs: str = "EPSG:2180",
@@ -427,8 +443,12 @@ def render_masterplan(
 
     ``metrics`` is the Phase 9 capacity metrics (a ``MasterplanMetrics`` object or its
     ``to_dict()`` form); when present its ``stage_table`` feeds the side table panel.
+    ``violations`` (Phase 10) are failing rule-check evidence geometries rendered as
+    the red top-z-order :attr:`LayerRole.VIOLATION` overlay.
     """
-    layers, annotations = masterplan_layers(proposal_or_variant, parcel, envelope=envelope)
+    layers, annotations = masterplan_layers(
+        proposal_or_variant, parcel, envelope=envelope, violations=violations
+    )
     table_rows: list[dict[str, Any]] | None = None
     if metrics is not None:
         metrics_dict = metrics.to_dict() if hasattr(metrics, "to_dict") else metrics

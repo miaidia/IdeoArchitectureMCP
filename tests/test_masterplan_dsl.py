@@ -233,6 +233,34 @@ def test_segment_requires_rectangles_or_polygon() -> None:
         )
 
 
+def test_windowed_walls_out_of_range_index_rejected() -> None:
+    # m4: an index past the composed footprint's wall-plane edge count would
+    # silently mark EVERY wall windowless (weaker §12 bracket, no §13/§60
+    # protections) — it must be a parse-time rejection naming the edge count.
+    segment = {"polygon": _rect(10, 10, 20, 10), "floors": 3, "use": "mieszkalny"}
+    with pytest.raises(ValidationError, match="windowed_walls") as excinfo:
+        MasterplanProposal.model_validate(
+            {
+                "buildings": [
+                    {"name": "B", "segments": [{**segment, "windowed_walls": [7]}]}
+                ]
+            }
+        )
+    message = str(excinfo.value)
+    assert "out of range" in message
+    assert "4" in message, "a rectangle decomposes into 4 wall-plane edges"
+
+    # Valid indices (a rectangle has edges 0..3) parse unchanged.
+    ok = MasterplanProposal.model_validate(
+        {
+            "buildings": [
+                {"name": "B", "segments": [{**segment, "windowed_walls": [0, 3]}]}
+            ]
+        }
+    )
+    assert ok.buildings[0].segments[0].windowed_walls == [0, 3]
+
+
 # --------------------------------------------------------------------------- #
 # Buildings-within-parcel: SCORING-time violation, not a parse rejection
 # --------------------------------------------------------------------------- #

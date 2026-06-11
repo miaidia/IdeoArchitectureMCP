@@ -63,6 +63,10 @@ input_defaults:
   przejazd_present: false
 thresholds:
   trigger_height_m: 12.0        # budynek sredniowysoki: >12 m (WT par. 8) — dla ZL III/IV/V
+  # par. 12 ust. 2 — "gdy krotszy bok budynku ma wiecej niz 60 m" -> droga z dwoch
+  # stron. Named threshold so the Phase 10 caller computing shorter_side_over_60m
+  # reads the 60 m from THIS ruleset, never a Python literal.
+  both_sides_shorter_side_m: 60.0
   min_road_width_m: 4.0         # par. 13 ust. 1
   max_longitudinal_slope_pct: 5.0  # par. 13 ust. 1
   edge_distance_min_m: 5.0      # par. 12 ust. 2 (obiekty ZL)

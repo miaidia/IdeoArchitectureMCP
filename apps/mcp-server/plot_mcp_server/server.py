@@ -338,11 +338,43 @@ def monitoring_create(
     return _app(ctx).usecases.monitoring_create(scope, target_id, purpose)
 
 
-@mcp.tool(annotations=_WRITE_DESTRUCTIVE, description="Apply expert override with audit trail.")
+@mcp.tool(
+    annotations=_WRITE_DESTRUCTIVE,
+    description=(
+        "Apply expert override with audit trail. target_id is a rule id "
+        "(rule-wide: every building/pair of the rule) or 'rule_id#subject' to "
+        "scope it to ONE evaluation subject (building name; 'pair:A|B' with "
+        "names sorted for pairwise par. 271 checks; 'parking:N' for par. 19). "
+        "applied=True/'active' only when the rule is consumed by the Phase 10 "
+        "validators AND analysis_id is actually evaluated by a production path "
+        "(= 'adhoc' until propose_layout is analysis-bound, Phase 12); "
+        "otherwise the override is recorded and activates later."
+    ),
+)
 def manual_override(
-    analysis_id: Annotated[str, Field(description="Analysis run id.")],
+    analysis_id: Annotated[
+        str,
+        Field(
+            description=(
+                "Analysis run id. Only 'adhoc' is consumed by a production "
+                "path today (propose_layout); other ids are recorded and "
+                "activate once evaluation is analysis-bound (Phase 12)."
+            )
+        ),
+    ],
     target_type: Annotated[str, Field(description="Entity type being overridden (e.g. 'rule').")],
-    target_id: Annotated[str, Field(description="Identifier of the overridden entity (e.g. rule id).")],
+    target_id: Annotated[
+        str,
+        Field(
+            description=(
+                "Identifier of the overridden entity: a rule id (rule-wide) or "
+                "'rule_id#subject' scoping the override to one evaluation "
+                "subject (building name / 'pair:A|B' sorted / 'parking:N'). "
+                "Without '#subject' the override applies rule-wide — audited "
+                "as scope: rule-wide."
+            )
+        ),
+    ],
     reason: Annotated[str, Field(description="Reason for the override (audit, NFR-AUD-003).")],
     user_id: Annotated[str, Field(description="Author of the override (audit, NFR-AUD-003).")],
     after: Annotated[
@@ -459,8 +491,18 @@ def propose_layout(
         "audit": out["audit"],
         "note": out["note"],
     }
-    # Masterplan extras (Phase 9): metrics tables + unknowns + stored variant pointer.
-    for key in ("schema_version", "variant_id", "metrics", "unknowns", "metrics_resource"):
+    # Masterplan extras (Phase 9/10): metrics tables + unknowns + stored variant
+    # pointer + the Phase 10 inter-building WT/ppoż rule outcomes (full trace +
+    # geometry evidence; the violation overlay itself is in the inlined image and
+    # the persisted style-metadata sidecar).
+    for key in (
+        "schema_version",
+        "variant_id",
+        "metrics",
+        "unknowns",
+        "metrics_resource",
+        "inter_building_checks",
+    ):
         if key in out:
             structured[key] = out[key]
     return CallToolResult(
