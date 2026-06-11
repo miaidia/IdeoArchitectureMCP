@@ -291,6 +291,90 @@ class CapacityScenario(_Base):
     geometry: GeoJSON | None = Field(
         default=None, description="Scenario footprint geometry in EPSG:2180 (GeoJSON)."
     )
+    masterplan_variant_id: str | None = Field(
+        default=None,
+        description=(
+            "Optional MasterplanVariant id this scenario was derived from (Phase 9). "
+            "None for the no-drawing envelope+indicator scenarios."
+        ),
+    )
+
+
+class StoreyRecord(_Base):
+    """One storey of a building (Phase 9 PB-forward placeholder; filled in Phase 15)."""
+
+    level: int = Field(description="Storey level (0 = parter; negative = underground).")
+    height_m: float | None = Field(default=None, description="Clear storey height in metres.")
+    use: str = Field(description="Storey use (mieszkalny | uslugowy | garaz | techniczny | ...).")
+    area_m2: float | None = Field(default=None, ge=0.0, description="Storey floor area in m^2.")
+
+
+class BuildingRecord(_Base):
+    """One building of a masterplan variant (Phase 9 §9.1.3; ROBYG-class deliverable)."""
+
+    id: str = Field(description="Building record id.")
+    name: str = Field(description="Building name (e.g. 'Budynek 1').")
+    geometry: GeoJSON | None = Field(
+        default=None, description="Footprint geometry in EPSG:2180 (GeoJSON)."
+    )
+    floors_by_segment: list[int] = Field(
+        default_factory=list, description="Above-ground floors per building segment/wing."
+    )
+    uses: list[str] = Field(
+        default_factory=list, description="Uses per segment (mieszkalny | uslugowy | ...)."
+    )
+    stage: int | None = Field(default=None, description="Construction stage (etap realizacji).")
+    status: str = Field(
+        default="projektowany",
+        description="projektowany | istniejacy | w_budowie | zrealizowany | zabytek_do_remontu.",
+    )
+    underground_floors: int = Field(
+        default=0, ge=0, description="Underground (hala garażowa) levels."
+    )
+    metrics: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Per-building capacity metrics (PUM/PUU/mieszkania with basis metadata).",
+    )
+    storeys: list[StoreyRecord] = Field(
+        default_factory=list,
+        description="PB-forward storey records (empty until Phase 15; no schema break later).",
+    )
+
+
+class MasterplanVariant(_Base):
+    """A multi-building masterplan variant (Phase 9 §9.1.3; extends toward PZT)."""
+
+    id: str = Field(description="Masterplan variant id.")
+    analysis_id: str | None = Field(default=None, description="Owning analysis run id.")
+    buildings: list[BuildingRecord] = Field(
+        default_factory=list, description="Buildings of the variant."
+    )
+    roads: list[dict[str, Any]] = Field(
+        default_factory=list, description="Internal roads (geometry + width + function)."
+    )
+    parking: list[dict[str, Any]] = Field(
+        default_factory=list, description="Parking elements (kind, polygon, spaces)."
+    )
+    greenery: list[GeoJSON] = Field(
+        default_factory=list, description="Greenery (PBC) polygons in EPSG:2180."
+    )
+    playgrounds: list[GeoJSON] = Field(
+        default_factory=list, description="Playground (plac zabaw) polygons in EPSG:2180."
+    )
+    retention: list[GeoJSON] = Field(
+        default_factory=list, description="Retention (retencja) polygons in EPSG:2180."
+    )
+    totals: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Variant totals (PUM/PUU/PU/mieszkania/coverage with basis metadata).",
+    )
+    stage_table: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Per-stage rows (Liczba mieszkań / PUM / PUU / PU) + SUMA row.",
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, description="Variant metadata (config, ruleset version, notes)."
+    )
 
 
 # --------------------------------------------------------------------------- #

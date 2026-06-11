@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from plot_agent.drawing.proposal import LayoutProposal
+from plot_agent.drawing.proposal import LayoutProposal, MasterplanProposal
 from plot_agent.drawing.score import ProposalScore
 
 
@@ -43,8 +43,10 @@ _COMPONENT_SUGGESTIONS: dict[str, str] = {
 }
 
 
-def critique(proposal: LayoutProposal, score: ProposalScore) -> StructuredCritique:
-    """Produce a structured critique guiding the next proposal (§4.1.B.4)."""
+def critique(
+    proposal: LayoutProposal | MasterplanProposal, score: ProposalScore
+) -> StructuredCritique:
+    """Produce a structured critique guiding the next proposal (§4.1.B.4; v2 Phase 9)."""
     if score.violations:
         violated = [v.kind for v in score.violations]
         suggestions: list[str] = []
@@ -55,6 +57,12 @@ def critique(proposal: LayoutProposal, score: ProposalScore) -> StructuredCritiq
         if "intersects_hard_constraint" in violated:
             suggestions.append(
                 "Pull the footprint away from the no-build / hard-constraint zone (it may not overlap)."
+            )
+        if "outside_parcel" in violated:
+            suggestions.append("Keep every building footprint inside the parcel boundary.")
+        if "inter_building_rule" in violated:
+            suggestions.append(
+                "Resolve the failed inter-building rule (WT/ppoż) cited in the violations."
             )
         if "empty_footprint" in violated:
             suggestions.append("Provide a non-empty footprint (GeoJSON polygon or draw-DSL rectangles).")

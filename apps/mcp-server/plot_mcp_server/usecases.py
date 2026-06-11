@@ -52,10 +52,9 @@ from plot_domain.enums import (
 # Marker version so reload is observable in tests/diagnostics even when ruleset
 # content is unchanged. Bump-by-reload is verified via the registry hash, but this
 # string also lets a test confirm the module object was re-imported.
-USECASES_BUILD = "phase8-planning"
+USECASES_BUILD = "phase9-masterplan"
 
 PHASE7_NOTE = "Stub: analysis logic lands in Phase 7; MCP delegates to the worker in Phase 12."
-PHASE9_NOTE = "Stub: capacity scenarios (chłonność, §8.5) land in Phase 9."
 
 # Injectable connector bundle for the analysis use-cases. The MCP server uses the
 # production bundle by default; tests set this to a mock so the run is zero-network.
@@ -527,9 +526,96 @@ def constraints_compute(analysis_id: str | None) -> dict[str, Any]:
     }
 
 
-def capacity_generate_scenarios(analysis_id: str | None) -> dict[str, Any]:
-    """Stub capacity scenarios (chłonność, §8.5; lands in Phase 9)."""
-    return {"analysis_id": analysis_id, "scenarios": [], "note": PHASE9_NOTE}
+def _indicator_map(
+    indicators: dict[str, Any] | list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    """Normalise indicators to a ``name -> value`` map (Phase 9 §9.1.2).
+
+    Accepts the plain map form OR the ``planning_parse_document`` indicator list
+    (``PlanningIndicator``-shaped dicts with ``name``/``value``). Only the canonical
+    Phase 8 indicator names are kept — the capacity engine reads EXACT keys.
+    """
+    from plot_planning import INDICATOR_NAMES
+
+    if not indicators:
+        return {}
+    if isinstance(indicators, dict):
+        return {k: v for k, v in indicators.items() if k in INDICATOR_NAMES and v is not None}
+    out: dict[str, Any] = {}
+    for item in indicators:
+        name = item.get("name")
+        if name in INDICATOR_NAMES and item.get("value") is not None:
+            out[str(name)] = item["value"]
+    return out
+
+
+def capacity_generate_scenarios(
+    analysis_id: str | None,
+    indicators: dict[str, Any] | list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Real capacity scenarios (Phase 9 §9.1.2; F-0202–0206) — no drawing required.
+
+    Computes conservative/base/optimistic/max scenarios + sensitivity from the STORED
+    analysis' buildable envelope and the supplied Phase 8 MPZP/WZ indicators (the
+    ``planning_parse_document`` output or a plain ``name -> value`` map). Missing
+    indicators propagate as ``unknowns`` and partial scenarios — never defaults (§0v2.4).
+    """
+    from plot_planning import CapacityConfig
+    from plot_planning import generate_capacity_scenarios as _generate
+
+    result = DEFAULT_STORE.get(analysis_id) if analysis_id else None
+    if result is None:
+        return {
+            "analysis_id": analysis_id,
+            "scenarios": [],
+            "status": "not_found",
+            "note": (
+                "Brak zapisanej analizy o tym id — uruchomić parcel_analyze; chłonność "
+                "liczy się z buildable envelope tej analizy (F-0202–0205)."
+            ),
+        }
+    envelope = result.buildable_envelope
+    if envelope is None or not envelope.area_m2:
+        return {
+            "analysis_id": analysis_id,
+            "scenarios": [],
+            "status": "no_envelope",
+            "note": "Analiza nie ma policzonego buildable envelope — chłonność niedostępna.",
+        }
+    parcel_area: float | None = None
+    if result.parcel is not None and result.parcel.area_m2:
+        parcel_area = float(result.parcel.area_m2)
+    elif isinstance(envelope.metadata, dict) and envelope.metadata.get("parcel_area_m2"):
+        parcel_area = float(envelope.metadata["parcel_area_m2"])
+    if parcel_area is None or parcel_area <= 0:
+        return {
+            "analysis_id": analysis_id,
+            "scenarios": [],
+            "status": "no_parcel_area",
+            "note": "Brak powierzchni działki — wskaźniki coverage/intensywności nieobliczalne.",
+        }
+
+    cfg = CapacityConfig()
+    scenario_set = _generate(
+        envelope_area_m2=float(envelope.area_m2),
+        parcel_area_m2=parcel_area,
+        indicators=_indicator_map(indicators),
+        config=cfg,
+        analysis_id=analysis_id,
+    )
+    return {
+        "analysis_id": analysis_id,
+        "envelope_area_m2": float(envelope.area_m2),
+        "parcel_area_m2": parcel_area,
+        **scenario_set.to_dict(),
+        "config": cfg.basis_block(),
+        "status": "computed",
+        "note": (
+            "Scenariusze conservative/base/optimistic/max z buildable envelope + "
+            "wskaźników MPZP/WZ (F-0202–0206); brakujące wskaźniki pozostają unknown "
+            "(nigdy wartości domyślne, §0v2.4)."
+        ),
+    }
 
 
 def risks_list(analysis_id: str | None) -> dict[str, Any]:
@@ -889,14 +975,24 @@ def _drawing_context(ruleset_dir: str | None = None) -> Any:
     )
 
 
-def propose_layout_render(proposal_payload: dict[str, Any]) -> dict[str, Any]:
-    """Validate + render + score + critique a typed LayoutProposal (§4.1.C / §4.4).
+def propose_layout_render(
+    proposal_payload: dict[str, Any],
+    indicators: dict[str, Any] | list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Validate + render + score + critique a typed proposal (§4.1.C / §4.4; Phase 9).
 
-    Returns a dict with the rendered PNG bytes (the server inlines them as image content)
-    plus structured ``{score, critique, accepted, violations}``. The proposal is parsed
-    by Pydantic (typed DATA, never trusted free-form — NFR-SEC-003); a hard-violating
-    proposal returns ``accepted=False`` regardless of its score (§14.2).
+    Discrimination (Phase 9 §9.1.1): a payload carrying a ``buildings`` key (or
+    ``schema_version == 2``) takes the MASTERPLAN path (ingest validation → capacity
+    metrics → renderer v2 → masterplan score); anything else takes the UNCHANGED v1
+    ``LayoutProposal`` path byte-for-byte. Returns a dict with the rendered PNG bytes
+    plus structured ``{score, critique, accepted, violations}`` (masterplans add
+    ``metrics``/``unknowns``/``variant_id``). The proposal is parsed by Pydantic (typed
+    DATA, never trusted free-form — NFR-SEC-003); a hard-violating proposal returns
+    ``accepted=False`` regardless of its score (§14.2).
     """
+    if "buildings" in proposal_payload or proposal_payload.get("schema_version") == 2:
+        return _propose_masterplan_render(proposal_payload, indicators)
+
     from plot_agent.drawing import DrawingLoop, LayoutProposal
 
     context = _drawing_context()
@@ -916,6 +1012,122 @@ def propose_layout_render(proposal_payload: dict[str, Any]) -> dict[str, Any]:
         # Audit entry (F-0446) recorded inside the loop; surface its summary here.
         "audit": loop.audit_log[-1].to_dict() if loop.audit_log else None,
         "note": "Footprint validated against hard constraints BEFORE scoring (§14.2).",
+    }
+
+
+def _propose_masterplan_render(
+    proposal_payload: dict[str, Any],
+    indicators: dict[str, Any] | list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Masterplan path of ``propose_layout`` (Phase 9 §9.1): ingest-validate →
+    capacity metrics → renderer v2 → score (hard-blocker dominance) → variant store.
+
+    ``inter_building_checks`` is passed EMPTY — the Phase 10 WT validators plug in
+    there. Variant metrics are stored in :data:`plot_agent.drawing.DEFAULT_VARIANT_STORE`
+    and served by the ``analysis://{analysis_id}/masterplan/{variant_id}/metrics.json``
+    resource (and embedded in the tool result for convenience).
+    """
+    from plot_agent.drawing import (
+        DEFAULT_VARIANT_STORE,
+        MasterplanProposal,
+        critique,
+        score_masterplan,
+    )
+    from plot_agent.drawing.loop import DEFAULT_ACCEPTANCE_THRESHOLD
+    from plot_domain import BuildingRecord, MasterplanVariant
+    from plot_planning import CapacityConfig, masterplan_metrics
+    from plot_reports import get_artifact_store, render_masterplan
+    from shapely.geometry import mapping
+
+    context = _drawing_context()
+    # Ingest validation (make_valid / finite coords / EPSG:2180 plausibility) runs in
+    # the Pydantic validators; buildings-within-parcel is a SCORING-time violation.
+    proposal = MasterplanProposal.model_validate(proposal_payload)
+    metrics = masterplan_metrics(
+        proposal,
+        context.parcel_geom(),
+        _indicator_map(indicators),
+        config=CapacityConfig(),
+        registry=context.ruleset,
+    )
+    # Phase 10 hook: inter_building_checks stays EMPTY until the WT validators land.
+    score = score_masterplan(proposal, context, metrics, inter_building_checks=[])
+    crit = critique(proposal, score)
+    render = render_masterplan(
+        proposal,
+        context.parcel_geom(),
+        metrics=metrics,
+        envelope=context.envelope_geom(),
+    )
+
+    variant_id = f"mvar:{uuid.uuid4().hex[:8]}"
+    artifact_uri = get_artifact_store().put_render(f"masterplan/{variant_id}.png", render)
+    variant = MasterplanVariant(
+        id=variant_id,
+        buildings=[
+            BuildingRecord(
+                id=f"bld:{variant_id}:{i + 1}",
+                name=building.name,
+                geometry=dict(mapping(building.footprint_geometry())),
+                floors_by_segment=[s.floors for s in building.segments],
+                uses=[s.use for s in building.segments],
+                stage=building.stage,
+                status=building.status,
+                underground_floors=building.underground_floors,
+                metrics=bm.to_dict(),
+            )
+            for i, (building, bm) in enumerate(
+                zip(proposal.buildings, metrics.per_building, strict=True)
+            )
+        ],
+        roads=[r.model_dump(mode="json") for r in proposal.roads],
+        parking=[p.model_dump(mode="json") for p in proposal.parking],
+        greenery=list(proposal.greenery_polygons),
+        playgrounds=list(proposal.playgrounds),
+        retention=list(proposal.retention),
+        totals=metrics.totals,
+        stage_table=metrics.stage_table,
+        metadata={
+            "config_basis": metrics.config_basis,
+            "ruleset_version": context.ruleset.ruleset_version,
+            "zabudowa_srodmiejska": proposal.zabudowa_srodmiejska,
+        },
+    )
+    DEFAULT_VARIANT_STORE.put(variant)
+
+    accepted = bool(score.valid and score.total >= DEFAULT_ACCEPTANCE_THRESHOLD)
+    audit = {  # masterplan audit record (F-0446): inputs, score, artifact, timestamp
+        "timestamp": _now().isoformat(),
+        "schema_version": 2,
+        "variant_id": variant_id,
+        "buildings": len(proposal.buildings),
+        "inputs": proposal.model_dump(mode="json"),
+        "total": score.total,
+        "valid": score.valid,
+        "accepted": accepted,
+        "violations": [v.to_dict() for v in score.violations],
+        "artifact_uri": artifact_uri,
+    }
+    return {
+        "png_bytes": render.data,
+        "mime_type": render.mime_type,
+        "accepted": accepted,
+        "valid": score.valid,
+        "score": score.to_dict(),
+        "critique": crit.to_dict(),
+        "violations": [v.to_dict() for v in score.violations],
+        "artifact_uri": artifact_uri,
+        "audit": audit,
+        "schema_version": 2,
+        "variant_id": variant_id,
+        "metrics": metrics.to_dict(),
+        "unknowns": [u.model_dump(mode="json") for u in metrics.unknowns],
+        "metrics_resource": f"analysis://adhoc/masterplan/{variant_id}/metrics.json",
+        "note": (
+            "Masterplan DSL v2: walidacja twardych ograniczeń PRZED punktacją (§14.2); "
+            "metryki chłonności z basis-metadanymi; walidatory między-budynkowe (WT/ppoż) "
+            "wpinają się w Phase 10 (inter_building_checks)."
+        ),
     }
 
 

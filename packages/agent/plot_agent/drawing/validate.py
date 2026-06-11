@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from shapely.geometry.base import BaseGeometry
 
 from plot_agent.context import AnalysisContext
-from plot_agent.drawing.proposal import LayoutProposal
+from plot_agent.drawing.proposal import LayoutProposal, MasterplanProposal
 
 # Tolerance (m²) for floating-point spill outside the envelope — below this we treat the
 # footprint as contained (avoids spurious violations from tiny boundary numeric noise).
@@ -28,7 +28,9 @@ _AREA_EPS_M2 = 1e-6
 class Violation:
     """A hard-constraint violation (§14.2). ``kind`` is machine-readable."""
 
-    kind: str  # "outside_envelope" | "intersects_hard_constraint" | "empty_footprint"
+    # "outside_envelope" | "intersects_hard_constraint" | "empty_footprint"
+    # | "outside_parcel" (Phase 9 masterplan: building not within the parcel)
+    kind: str
     detail: str
     overlap_area_m2: float = 0.0
 
@@ -79,4 +81,74 @@ def validate_hard(proposal: LayoutProposal, context: AnalysisContext) -> list[Vi
                 )
             )
 
+    return violations
+
+
+def validate_hard_masterplan(
+    proposal: MasterplanProposal, context: AnalysisContext
+) -> list[Violation]:
+    """Hard guard for a masterplan proposal (Phase 9 §9.1.5 + §14.2).
+
+    * EVERY building must lie within the parcel — buildings-within-parcel is checked
+      HERE at scoring time (recorded as ``outside_parcel`` violations), never
+      hard-rejected at parse (consistent with the v1 ``validate_hard`` behaviour);
+    * NEW buildings (status ``projektowany`` / ``w_budowie``) must additionally stay
+      inside the buildable envelope and clear of hard/no-build zones — existing /
+      heritage buildings already stand, so the envelope guard does not apply to them.
+    """
+    violations: list[Violation] = []
+    parcel = context.parcel_geom()
+    envelope = context.envelope_geom()
+
+    for building in proposal.buildings:
+        footprint = building.footprint_geometry()
+        if footprint.is_empty or footprint.area <= 0:
+            violations.append(
+                Violation(kind="empty_footprint", detail=f"{building.name}: empty footprint")
+            )
+            continue
+        outside_parcel = float(footprint.difference(parcel).area)
+        if outside_parcel > _AREA_EPS_M2:
+            violations.append(
+                Violation(
+                    kind="outside_parcel",
+                    detail=(
+                        f"{building.name}: {outside_parcel:,.2f} m² of footprint lies "
+                        "outside the parcel"
+                    ),
+                    overlap_area_m2=round(outside_parcel, 4),
+                )
+            )
+        if building.status not in ("projektowany", "w_budowie"):
+            continue  # existing/heritage: parcel containment only
+        outside_env = _outside_envelope_area(footprint, envelope)
+        if outside_env > _AREA_EPS_M2:
+            violations.append(
+                Violation(
+                    kind="outside_envelope",
+                    detail=(
+                        f"{building.name}: {outside_env:,.2f} m² of footprint lies "
+                        "outside the buildable envelope"
+                    ),
+                    overlap_area_m2=round(outside_env, 4),
+                )
+            )
+        for i, hard in enumerate(context.hard_geoms()):
+            inter = footprint.intersection(hard)
+            if not inter.is_empty and inter.area > _AREA_EPS_M2:
+                violations.append(
+                    Violation(
+                        kind="intersects_hard_constraint",
+                        detail=(
+                            f"{building.name}: footprint intersects hard/no-build zone "
+                            f"#{i + 1} by {inter.area:,.2f} m²"
+                        ),
+                        overlap_area_m2=round(float(inter.area), 4),
+                    )
+                )
+
+    if not proposal.buildings:
+        violations.append(
+            Violation(kind="empty_footprint", detail="masterplan has no buildings")
+        )
     return violations

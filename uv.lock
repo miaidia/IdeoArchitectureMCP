@@ -1714,6 +1714,7 @@ source = { editable = "packages/planning" }
 dependencies = [
     { name = "jsonschema" },
     { name = "plot-domain" },
+    { name = "plot-rules" },
     { name = "pydantic" },
     { name = "shapely" },
 ]
@@ -1722,6 +1723,7 @@ dependencies = [
 requires-dist = [
     { name = "jsonschema", specifier = ">=4.21" },
     { name = "plot-domain", editable = "packages/domain" },
+    { name = "plot-rules", editable = "packages/rules" },
     { name = "pydantic", specifier = ">=2" },
     { name = "shapely", specifier = ">=2.0" },
 ]

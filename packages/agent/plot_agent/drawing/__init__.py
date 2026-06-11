@@ -15,20 +15,35 @@ from plot_agent.drawing.critique import StructuredCritique, critique
 from plot_agent.drawing.loop import DrawingLoop, IterationResult
 from plot_agent.drawing.memory import DrawingExemplarStore, Exemplar
 from plot_agent.drawing.proposal import (
+    BuildingSegment,
+    BuildingSpec,
     LayoutProposal,
+    MasterplanProposal,
+    ParkingElement,
     PlacedRectangle,
+    RoadElement,
+    parse_proposal,
     shape_class_for,
 )
-from plot_agent.drawing.score import ProposalScore, score_proposal
-from plot_agent.drawing.validate import Violation, validate_hard
+from plot_agent.drawing.score import ProposalScore, score_masterplan, score_proposal
+from plot_agent.drawing.validate import Violation, validate_hard, validate_hard_masterplan
+from plot_agent.drawing.variants import DEFAULT_VARIANT_STORE, MasterplanVariantStore
 
 __all__ = [
+    "BuildingSegment",
+    "BuildingSpec",
     "LayoutProposal",
+    "MasterplanProposal",
+    "ParkingElement",
     "PlacedRectangle",
+    "RoadElement",
+    "parse_proposal",
     "shape_class_for",
     "Violation",
     "validate_hard",
+    "validate_hard_masterplan",
     "ProposalScore",
+    "score_masterplan",
     "score_proposal",
     "StructuredCritique",
     "critique",
@@ -36,4 +51,6 @@ __all__ = [
     "Exemplar",
     "DrawingLoop",
     "IterationResult",
+    "DEFAULT_VARIANT_STORE",
+    "MasterplanVariantStore",
 ]

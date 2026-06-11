@@ -89,6 +89,79 @@ _ROLE_STYLE: dict[LayerRole, dict[str, Any]] = {
         "linewidth": 0.8,
         "z_order": 0,
     },
+    # ---- Phase 9 masterplan roles (renderer v2) — deterministic status hatching ---- #
+    LayerRole.GREENERY: {
+        "facecolor": "#a1d99b",  # green — teren biologicznie czynny
+        "edgecolor": "#31a354",
+        "alpha": 0.7,
+        "linewidth": 0.7,
+        "z_order": 2,
+    },
+    LayerRole.RETENTION: {
+        "facecolor": "#c6dbef",  # pale blue — retencja
+        "edgecolor": "#08519c",
+        "alpha": 0.55,
+        "linewidth": 0.7,
+        "hatch": "--",
+        "z_order": 2,
+    },
+    LayerRole.ROAD: {
+        "facecolor": "#d9d9d9",  # grey corridor — KDW / pożarowa / pieszojezdnia
+        "edgecolor": "#7a7a7a",
+        "alpha": 1.0,
+        "linewidth": 0.6,
+        "z_order": 3,
+    },
+    LayerRole.PARKING: {
+        "facecolor": "#9ecae1",  # blue — parking
+        "edgecolor": "#3182bd",
+        "alpha": 0.7,
+        "linewidth": 0.7,
+        "hatch": "||",
+        "z_order": 4,
+    },
+    LayerRole.PLAYGROUND: {
+        "facecolor": "#fdd0a2",  # orange — plac zabaw
+        "edgecolor": "#e6550d",
+        "alpha": 0.8,
+        "linewidth": 0.8,
+        "hatch": "..",
+        "z_order": 5,
+    },
+    # Building-by-status hatching (exemplar legend: istniejące / zrealizowane /
+    # w budowie / projektowane). zabytek_do_remontu maps to EXISTING with a distinct
+    # per-layer edge override (masterplan renderer).
+    LayerRole.BUILDING_EXISTING: {
+        "facecolor": "#b0b0b0",
+        "edgecolor": "#3c3c3c",
+        "alpha": 0.9,
+        "linewidth": 1.0,
+        "hatch": "//",
+        "z_order": 7,
+    },
+    LayerRole.BUILDING_COMPLETED: {
+        "facecolor": "#ffffff",
+        "edgecolor": "#3c3c3c",
+        "alpha": 0.9,
+        "linewidth": 1.0,
+        "hatch": "\\\\",
+        "z_order": 7,
+    },
+    LayerRole.BUILDING_UNDER_CONSTRUCTION: {
+        "facecolor": "#f5deb3",
+        "edgecolor": "#8a6d1a",
+        "alpha": 0.9,
+        "linewidth": 1.0,
+        "hatch": "xx",
+        "z_order": 7,
+    },
+    LayerRole.BUILDING_PLANNED: {
+        "facecolor": "#c44e52",
+        "edgecolor": "#6e1f23",
+        "alpha": 0.9,
+        "linewidth": 1.1,
+        "z_order": 8,
+    },
 }
 
 # Fixed canvas geometry for reproducible pixels (Phase 3 §3.4).
@@ -222,6 +295,10 @@ class MapRenderer:
                 zorder=zorder,
             )
         else:
+            extra: dict[str, Any] = {}
+            if style.get("hatch"):
+                # Phase 9 status hatching — passed through to the PatchCollection.
+                extra["hatch"] = style["hatch"]
             series.plot(
                 ax=ax,
                 facecolor=style["facecolor"],
@@ -229,6 +306,7 @@ class MapRenderer:
                 alpha=style["alpha"],
                 linewidth=style["linewidth"],
                 zorder=zorder,
+                **extra,
             )
         return True
 
@@ -266,6 +344,7 @@ class MapRenderer:
                         facecolor=style["facecolor"],
                         edgecolor=style["edgecolor"],
                         alpha=style["alpha"],
+                        hatch=style.get("hatch"),
                         label=label,
                     )
                 )

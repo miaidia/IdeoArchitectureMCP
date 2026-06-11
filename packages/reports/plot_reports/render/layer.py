@@ -25,7 +25,9 @@ class LayerRole(str, Enum):
     """Semantic role of a layer — drives deterministic colour + z-order (Phase 3 §3.4).
 
     Values are stable strings so they serialise predictably into style metadata
-    (NFR-AUD-009) and golden snapshots.
+    (NFR-AUD-009) and golden snapshots. Phase 9 adds the masterplan roles: buildings by
+    STATUS (the exemplar legend: istniejące / zrealizowane / w budowie / projektowane),
+    roads, parking, playgrounds, greenery and retention.
     """
 
     PARCEL = "parcel"
@@ -35,6 +37,16 @@ class LayerRole(str, Enum):
     CONSTRAINT_SOFT = "constraint_soft"
     NETWORK = "network"
     OTHER = "other"
+    # Phase 9 masterplan roles (renderer v2) — building hatching by status.
+    BUILDING_EXISTING = "building_existing"
+    BUILDING_COMPLETED = "building_completed"
+    BUILDING_UNDER_CONSTRUCTION = "building_under_construction"
+    BUILDING_PLANNED = "building_planned"
+    ROAD = "road"
+    PARKING = "parking"
+    PLAYGROUND = "playground"
+    GREENERY = "greenery"
+    RETENTION = "retention"
 
 
 def _to_shapely(geom: GeometryLike) -> BaseGeometry:

@@ -14,7 +14,12 @@ Public surface:
   (F-0121–0123);
 * :func:`detect_conflicts` — GML-vs-document conflicts, never auto-resolved
   (§25.2, F-0125);
-* :func:`stability_score` — traced planning-stability heuristic (F-0126).
+* :func:`stability_score` — traced planning-stability heuristic (F-0126);
+* :mod:`plot_planning.capacity` — the Phase 9 chłonność engine
+  (:func:`building_metrics` / :func:`masterplan_metrics` /
+  :func:`generate_capacity_scenarios`, §8.5 F-0180–0215): estimation factors live in
+  :class:`CapacityConfig` (basis ``industry_heuristic``); legal values (WT §39/§40) are
+  read from the ruleset registry via :mod:`plot_rules`.
 
 Decoupling (§9.4): no imports of ``plot_connectors`` (fetching is orchestrated
 above this layer) and no legal threshold values in code (rulesets only).
@@ -22,6 +27,15 @@ above this layer) and no legal threshold values in code (rulesets only).
 
 from __future__ import annotations
 
+from plot_planning.capacity import (
+    BuildingMetrics,
+    CapacityConfig,
+    CapacityScenarioSet,
+    MasterplanMetrics,
+    building_metrics,
+    generate_capacity_scenarios,
+    masterplan_metrics,
+)
 from plot_planning.conflicts import (
     MANUAL_REVIEW_REQUIRED,
     Conflict,
@@ -59,15 +73,22 @@ __all__ = [
     "PLANNING_INDICATORS_SCHEMA",
     "UNKNOWN_ACT_ID",
     "USE_CATEGORIES",
+    "BuildingMetrics",
+    "CapacityConfig",
+    "CapacityScenarioSet",
     "Conflict",
     "GmlParseError",
     "IndicatorExtraction",
     "IndicatorValue",
+    "MasterplanMetrics",
     "ParsedPlanning",
     "PlanningStore",
     "ZoneCoverage",
+    "building_metrics",
     "detect_conflicts",
     "extract_indicators",
+    "generate_capacity_scenarios",
+    "masterplan_metrics",
     "indicators_from_zone",
     "missing_indicators",
     "parse_app_gml",

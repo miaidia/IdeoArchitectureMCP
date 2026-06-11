@@ -18,10 +18,14 @@ dependencies = [
     "jsonschema>=4.21",
     # PlanningAct / PlanningZone / PlanningIndicator / UnknownItem / EvidenceItem.
     "plot-domain",
+    # Phase 9 capacity engine: legal values (WT §39/§40 thresholds + brackets) are READ
+    # from the ruleset registry via the plot_rules engine — never hardcoded here.
+    "plot-rules",
 ]
 
 [tool.uv.sources]
 plot-domain = { workspace = true }
+plot-rules = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

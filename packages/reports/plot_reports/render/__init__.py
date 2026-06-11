@@ -14,6 +14,13 @@ colours, Agg backend, no network in tests (``basemap=False``).
 """
 
 from plot_reports.render.layer import Layer, LayerRole
+from plot_reports.render.masterplan import (
+    MASTERPLAN_RENDERER_VERSION,
+    MapAnnotation,
+    MasterplanRenderer,
+    masterplan_layers,
+    render_masterplan,
+)
 from plot_reports.render.renderer import (
     RENDERER_VERSION,
     MapRenderer,
@@ -24,8 +31,13 @@ from plot_reports.render.renderer import (
 __all__ = [
     "Layer",
     "LayerRole",
+    "MapAnnotation",
     "MapRenderer",
+    "MasterplanRenderer",
     "RenderResult",
+    "masterplan_layers",
     "render_map",
+    "render_masterplan",
     "RENDERER_VERSION",
+    "MASTERPLAN_RENDERER_VERSION",
 ]

@@ -28,12 +28,17 @@ from plot_reports.preview import (
     sample_preview_layers,
 )
 from plot_reports.render import (
+    MASTERPLAN_RENDERER_VERSION,
     RENDERER_VERSION,
     Layer,
     LayerRole,
+    MapAnnotation,
     MapRenderer,
+    MasterplanRenderer,
     RenderResult,
+    masterplan_layers,
     render_map,
+    render_masterplan,
 )
 from plot_reports.report import (
     headline_numbers,
@@ -53,10 +58,15 @@ __all__ = [
     # render
     "Layer",
     "LayerRole",
+    "MapAnnotation",
     "MapRenderer",
+    "MasterplanRenderer",
     "RenderResult",
+    "masterplan_layers",
     "render_map",
+    "render_masterplan",
     "RENDERER_VERSION",
+    "MASTERPLAN_RENDERER_VERSION",
     # report (Phase 7 §7.1.5 / §22)
     "render_markdown",
     "render_json",

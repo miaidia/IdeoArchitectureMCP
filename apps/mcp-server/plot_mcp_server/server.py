@@ -222,10 +222,22 @@ def constraints_compute(
 @mcp.tool(annotations=_READ_ONLY, description="Generate building capacity scenarios.")
 def capacity_generate_scenarios(
     analysis_id: Annotated[str | None, Field(description="Analysis run id.")] = None,
+    indicators: Annotated[
+        dict[str, Any] | list[dict[str, Any]] | None,
+        Field(
+            description=(
+                "Phase 8 MPZP/WZ indicators: either a {name: value} map or the "
+                "planning_parse_document 'indicators' list (canonical names: "
+                "max_intensity, max_height_m, max_kondygnacje, max_coverage_ratio, "
+                "min_pbc_ratio, parking_per_mieszkanie, parking_per_100m2_uslug). "
+                "Missing indicators stay unknown — never defaulted (§0v2.4)."
+            )
+        ),
+    ] = None,
     *,
     ctx: Context[ServerSession, AppContext],
 ) -> dict[str, Any]:
-    return _app(ctx).usecases.capacity_generate_scenarios(analysis_id)
+    return _app(ctx).usecases.capacity_generate_scenarios(analysis_id, indicators)
 
 
 @mcp.tool(annotations=_READ_ONLY, description="Return red flags, risk register and unknowns.")
@@ -392,18 +404,49 @@ def map_preview(
 # mcp/server/fastmcp/utilities/func_metadata.py:98 convert_result short-circuits on it).
 @mcp.tool(
     annotations=_READ_ONLY,
-    description="Propose a building footprint/site layout; validate hard constraints, render, score and critique it.",
+    description=(
+        "Propose a building footprint/site layout OR a multi-building masterplan "
+        "(DSL v2); validate hard constraints, render, score and critique it. Payloads "
+        "carrying a 'buildings' key (or schema_version=2) are parsed as a "
+        "MasterplanProposal (buildings/segments/floors/uses, roads, parking, "
+        "greenery, playgrounds, stages) and additionally return capacity metrics "
+        "(PUM/PUU/mieszkania with basis metadata) + per-stage table; v1 "
+        "LayoutProposal payloads keep working unchanged."
+    ),
     structured_output=False,
 )
 def propose_layout(
     proposal: Annotated[
         dict[str, Any],
-        Field(description="Typed LayoutProposal (program_type + GeoJSON footprint OR draw-DSL rectangles, floors, parking, greenery). Treated as DATA validated by rules, never trusted free-form (NFR-SEC-003)."),
+        Field(
+            description=(
+                "Typed proposal. v1 LayoutProposal: program_type + GeoJSON footprint "
+                "OR draw-DSL rectangles, floors, parking, greenery. v2 "
+                "MasterplanProposal (discriminated by the presence of 'buildings' or "
+                "schema_version=2): buildings[].segments (rectangles OR polygon, "
+                "floors, use, ground_floor_use), stage, status, underground_floors; "
+                "roads (centerline+width+function), parking (kind/polygon/spaces), "
+                "greenery_polygons, playgrounds, retention, zabudowa_srodmiejska. "
+                "Treated as DATA validated by rules, never trusted free-form "
+                "(NFR-SEC-003)."
+            )
+        ),
     ],
+    indicators: Annotated[
+        dict[str, Any] | list[dict[str, Any]] | None,
+        Field(
+            description=(
+                "Optional Phase 8 MPZP/WZ indicators ({name: value} map or the "
+                "planning_parse_document 'indicators' list) used by the masterplan "
+                "capacity metrics (parking demand, PBC, intensity limits). Missing "
+                "indicators stay unknown — never defaulted."
+            )
+        ),
+    ] = None,
     *,
     ctx: Context[ServerSession, AppContext],
 ) -> CallToolResult:
-    out = _app(ctx).usecases.propose_layout_render(proposal)
+    out = _app(ctx).usecases.propose_layout_render(proposal, indicators)
     # Inline the rendered PNG as an image content block (Phase 0.2 image path).
     image = Image(data=out["png_bytes"], format="png").to_image_content()
     structured = {
@@ -416,6 +459,10 @@ def propose_layout(
         "audit": out["audit"],
         "note": out["note"],
     }
+    # Masterplan extras (Phase 9): metrics tables + unknowns + stored variant pointer.
+    for key in ("schema_version", "variant_id", "metrics", "unknowns", "metrics_resource"):
+        if key in out:
+            structured[key] = out[key]
     return CallToolResult(
         content=[
             image,
@@ -583,6 +630,34 @@ def resource_buildable_envelope(analysis_id: str) -> str:
              "geometry": env.largest_inscribed_rectangle}
         )
     return json.dumps({"type": "FeatureCollection", "crs_note": "EPSG:2180", "features": features})
+
+
+@mcp.resource(
+    "analysis://{analysis_id}/masterplan/{variant_id}/metrics.json",
+    mime_type="application/json",
+)
+def resource_masterplan_metrics(analysis_id: str, variant_id: str) -> str:
+    # Phase 9: per-variant masterplan metrics (totals, stage table, per-building) from
+    # the propose_layout masterplan path. Variants are keyed process-locally by
+    # variant_id (analysis_id is echoed; 'adhoc' until propose_layout is analysis-bound).
+    from plot_agent.drawing import DEFAULT_VARIANT_STORE
+
+    variant = DEFAULT_VARIANT_STORE.get(variant_id)
+    if variant is None:
+        return json.dumps(
+            {"analysis_id": analysis_id, "variant_id": variant_id, "status": "not_found"}
+        )
+    return json.dumps(
+        {
+            "analysis_id": analysis_id,
+            "variant_id": variant_id,
+            "totals": variant.totals,
+            "stage_table": variant.stage_table,
+            "buildings": [b.model_dump(mode="json") for b in variant.buildings],
+            "metadata": variant.metadata,
+            "status": "ok",
+        }
+    )
 
 
 @mcp.resource("analysis://{analysis_id}/report.md", mime_type="text/markdown")

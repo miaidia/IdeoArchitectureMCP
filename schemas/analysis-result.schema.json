@@ -281,6 +281,19 @@
           "default": null,
           "description": "Scenario footprint geometry in EPSG:2180 (GeoJSON).",
           "title": "Geometry"
+        },
+        "masterplan_variant_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional MasterplanVariant id this scenario was derived from (Phase 9). None for the no-drawing envelope+indicator scenarios.",
+          "title": "Masterplan Variant Id"
         }
       },
       "required": [
