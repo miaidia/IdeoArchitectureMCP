@@ -22,8 +22,9 @@ engine evaluation of ``PL-PPOZ-271-273-FIRE-SEPARATION-001`` covers:
   = 0`` (no MPZP for the neighbor parcel → ZL assumption per §272 ust. 1 in
   fine).
   The whole parcel boundary is conservatively treated as a granica sąsiedniej
-  niezabudowanej działki budowlanej (road-parcel boundaries need Phase 12
-  neighbor data — documented assumption);
+  niezabudowanej działki budowlanej (road-parcel boundaries need EGiB
+  neighbor-PARCEL geometry, still not wired — the Phase 12 site context fetches
+  neighbor BUILDINGS only; documented assumption);
 * §273 — ``same_plot_within_fire_zone_limit``: the strefa pożarowa area table
   is NOT in our YAML corpus, so the joint-strefa exemption can only be claimed
   when the caller supplies ``strefa_pozarowa_limit_m2``; then the flag is

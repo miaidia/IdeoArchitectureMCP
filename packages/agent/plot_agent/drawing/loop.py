@@ -38,7 +38,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -110,9 +110,10 @@ class AuditEntry:
     Phase 11 adds: ``inputs_hash`` (canonical SHA-256 of ``inputs``), the score
     ``components``, the full structured ``critique`` and the model's ``rationale``
     (documentation only — never an input to validation, NFR-SEC-003).
-    ``analysis_id`` stamps the entry with the loop's owning analysis (today the
-    MCP layer's adhoc id; real ids Phase 12) so session-scoped consumers (the
-    koncepcja rationale section, previous-components seeding) can filter the
+    ``analysis_id`` stamps the entry with the loop's owning analysis (the bound
+    analysis id since Phase 12's ``propose_layout(analysis_id=...)``; the MCP
+    adhoc id for unbound calls) so session-scoped consumers (the koncepcja
+    rationale section, previous-components seeding) can filter the
     process-global audit log instead of reading entries from unrelated sessions.
     """
 
@@ -184,6 +185,11 @@ class DrawingLoop:
     # iteration; the MCP path seeds them from the last masterplan audit entry so
     # one-iteration-per-call sessions still get the "improved vs previous" signal).
     previous_components: dict[str, float] | None = None
+    # Phase 12 §10.1.6: existing neighbor buildings (typed
+    # plot_planning.wt_validators.NeighborBuilding records, e.g. from the
+    # BDOT10k site context) — forwarded into run_inter_building_checks so §13
+    # przesłanianie / §60 nasłonecznienie account for neighbor shadows.
+    neighbors: Sequence[Any] = ()
     _counter: int = field(default=0, repr=False)
     _pum_target_cache: float | None = field(default=None, repr=False)
     _pum_target_computed: bool = field(default=False, repr=False)
@@ -381,6 +387,7 @@ class DrawingLoop:
             proposal,
             parcel,
             self.context.ruleset,
+            neighbors=self.neighbors,  # Phase 12: BDOT10k neighbors shade §13/§60
             srodmiejska=proposal.zabudowa_srodmiejska,
             overrides=self.override_store,
             analysis_id=self.analysis_id,

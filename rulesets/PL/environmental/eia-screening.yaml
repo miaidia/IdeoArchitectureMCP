@@ -1,0 +1,49 @@
+# EIA screening thresholds by investment type (Phase 12 / v1 Phase 10 §10.1.4).
+# Source: Rozporządzenie Rady Ministrów z dnia 10 września 2019 r. w sprawie
+# przedsięwzięć mogących znacząco oddziaływać na środowisko (Dz.U. 2019 poz. 1839,
+# ze zm. m.in. Dz.U. 2023 poz. 1724) — §3 (przedsięwzięcia mogące POTENCJALNIE
+# znacząco oddziaływać — "grupa II": screening / decyzja środowiskowa na żądanie
+# organu).
+#
+# ⚠ VERIFY-BEFORE-PROD: the threshold VALUES below are rough encodings of the §3
+# powierzchnia-zabudowy thresholds from secondary summaries of the rozporządzenie
+# OOŚ; the literal ust./pkt wording MUST be verified against the ISAP consolidated
+# text before any production use (same discipline as the WT rules' isap_primary
+# verification). The structure (lower thresholds inside protected areas, §3 ust. 1
+# pkt 55/58) is stable law; the numbers carry verification: secondary_source.
+id: PL-EIA-SCREENING-001
+title: Screening obowiazku oceny oddzialywania na srodowisko wg typu inwestycji (grupa II)
+jurisdiction: PL
+valid_from: 2019-10-11
+valid_to: null
+source_reference: "Dz.U. 2019 poz. 1839 par. 3 (rozporzadzenie OOS, grupa II)"
+severity: soft
+inputs:
+  - investment_type          # mieszkaniowa | uslugowa | parking | przemyslowa
+  - investment_area_ha       # powierzchnia zabudowy/przedsiewziecia w ha
+  - in_protected_area        # bool — w formie ochrony przyrody (art. 6 u.o.p.)
+outputs:
+  - eia_screening_required
+  - eia_group
+  - applicability
+  - confidence
+logic: declarative_expression_or_function_ref
+verification: secondary_source  # ⚠ verify-before-prod against ISAP (see header)
+# Thresholds in HEKTARY (powierzchnia zabudowy / powierzchnia użytkowa terenu).
+# "<type>_ha" applies outside protected areas; "<type>_protected_ha" inside them.
+# At-or-above threshold → grupa II screening (karta informacyjna przedsięwzięcia).
+thresholds:
+  mieszkaniowa_ha: 2.0               # par. 3 ust. 1 pkt 55 lit. b (zabudowa mieszkaniowa wraz z infrastrukturą)
+  mieszkaniowa_protected_ha: 0.5     # par. 3 ust. 1 pkt 55 lit. a (na obszarach chronionych)
+  uslugowa_ha: 2.0                   # par. 3 ust. 1 pkt 56 (zabudowa usługowa, centra handlowe)
+  uslugowa_protected_ha: 0.5
+  parking_ha: 0.5                    # par. 3 ust. 1 pkt 58 (garaże/parkingi/zespoły parkingów)
+  parking_protected_ha: 0.2
+  przemyslowa_ha: 1.0                # par. 3 ust. 1 pkt 52 (zabudowa przemysłowa/magazynowa)
+  przemyslowa_protected_ha: 0.5
+notes: >-
+  Grupa I (obowiazkowy raport OOS, par. 2) nie jest tu kodowana — typowe
+  inwestycje kubaturowe analizowane przez system naleza co najwyzej do grupy II.
+  Wynik screeningu to PRZESLANKA proceduralna (pytanie do RDOS/wojta), nie
+  rozstrzygniecie prawne. Wartosci progow zweryfikowac z tekstem ISAP przed
+  uzyciem produkcyjnym (verification: secondary_source_verify_before_prod).

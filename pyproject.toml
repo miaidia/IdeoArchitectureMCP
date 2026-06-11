@@ -129,6 +129,8 @@ module = [
     "pandas.*",
     # Phase 11 composition axes (plot_planning.brief) — no py.typed marker upstream.
     "py_straight_skeleton.*",
+    # Phase 12 terrain module (site_context.terrain) — rasterio ships no py.typed.
+    "rasterio.*",
 ]
 ignore_missing_imports = true
 

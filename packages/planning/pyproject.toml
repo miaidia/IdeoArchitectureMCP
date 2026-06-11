@@ -31,6 +31,10 @@ dependencies = [
     # profile, frontage azimuth, shape metrics) — a downward dep (plot_geo depends
     # only on plot_domain/plot_shared), so the §9.4 decoupling rules stay intact.
     "plot-geo",
+    # Phase 12 site context (v1 Phase 10 §10.1.1): DEM/NMT GeoTIFF windowed reads
+    # (rasterio is in the v1 Phase 0.4 allowed list) + slope/aspect via numpy.gradient.
+    "rasterio>=1.4",
+    "numpy>=1.26",
 ]
 
 [tool.uv.sources]

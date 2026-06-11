@@ -10,9 +10,11 @@ Implements only the §14.1 scores that are **computable NOW** from geometry + ru
   ``default_max_coverage_ratio`` from ``rulesets/PL/planning/mn-coverage.yaml``.
 
 Every score is EXPLAINABLE (§14.2 / NFR-AUD-006): positive + negative factor lists and a
-confidence. Scores NOT computable yet (sun/geotech/heritage/infrastructure/...) are
-returned as ``None`` / ``unknown`` with a Phase-10 hook comment — they are NOT faked
-(§20.10 anti-pattern "don't optimise by hiding unknowns").
+confidence. Phase 12 wires the site-context §14 scores (terrain/geotech/heritage/
+infrastructure/...) through ``site_scores`` (computed by
+``plot_planning.site_context.compute_site_scores``); a hook without computed site
+data stays ``None`` / ``unknown`` with the module's reason — NOT faked (§20.10
+anti-pattern "don't optimise by hiding unknowns").
 """
 
 from __future__ import annotations
@@ -25,19 +27,20 @@ from pydantic import BaseModel, Field
 from plot_agent.context import AnalysisContext
 from plot_agent.rules_access import max_coverage_ratio
 
-# §14.1 scores that require Phase 10 data we don't have yet. Listed here so the loop
-# can surface them as explicit unknowns instead of silently dropping them (§20.10).
-# Each maps to where it lands: see IMPLEMENTATION_PLAN.md Phase 10 §10.1.
+# §14.1 scores produced by the Phase 12 site-context modules
+# (plot_planning.site_context.compute_site_scores). When a computed SiteScore is
+# supplied for a hook it becomes a REAL Score; otherwise the hook stays an
+# explicit unknown — only when the source data is genuinely absent (§20.10).
 PHASE10_SCORE_HOOKS: tuple[str, ...] = (
-    "infrastructure_score",  # Phase 10 §10.1.5 roads/utilities
-    "terrain_score",  # Phase 10 §10.1.1 DEM/slope
-    "environmental_risk_score",  # Phase 10 §10.1.4 Natura2000/EIA
-    "geotechnical_risk_score",  # Phase 10 §10.1.3 SOPO/geology
-    "heritage_risk_score",  # Phase 10 §10.1.4 NID/heritage
-    "procedural_risk_score",  # Phase 10 §10.1.7 scoring engine
-    "cost_driver_score",  # Phase 10 §10.1.7 scoring engine
-    "planning_certainty_score",  # Phase 8 planning intelligence
-    "investment_fit_score",  # Phase 10 §10.1.7 scoring engine (needs investor goal model)
+    "infrastructure_score",  # site_context.roads (BDOT10k/GESUT)
+    "terrain_score",  # site_context.terrain (NMT/DEM)
+    "environmental_risk_score",  # site_context.environment (GDOŚ + EIA ruleset)
+    "geotechnical_risk_score",  # site_context.geology (SOPO)
+    "heritage_risk_score",  # site_context.environment (NID)
+    "procedural_risk_score",  # site_context.scoring (procedures + unknowns)
+    "cost_driver_score",  # site_context.scoring (earthworks/networks/flood)
+    "planning_certainty_score",  # Phase 8 stability via site_context.scoring
+    "investment_fit_score",  # site_context.scoring (investor goal vs envelope)
 )
 
 
@@ -95,6 +98,12 @@ class ScoreEvaluator:
     proposed_footprint_inside_envelope: bool | None = None
     # Extra unknowns to record verbatim (e.g. from a stubbed analysis result).
     extra_unknowns: list[str] = field(default_factory=list)
+    # Phase 12: computed site-context scores (plot_planning.site_context.SiteScore
+    # by name). Supplied by the full-due-diligence pipeline; each hook with a
+    # computed (non-unknown) SiteScore becomes a real Score, the rest stay honest
+    # unknowns with the module's reason (§20.10 — unknown ONLY when the source
+    # data is genuinely absent).
+    site_scores: dict[str, Any] | None = None
 
     def evaluate(self, context: AnalysisContext) -> Scores:
         """Return the explainable score set for ``context`` (§14.2 / NFR-AUD-006)."""
@@ -103,12 +112,10 @@ class ScoreEvaluator:
         scores["data_confidence_score"] = self._data_confidence(context)
         scores["coverage_vs_ruleset"] = self._coverage_vs_ruleset(context)
 
-        # Phase 10 §14 scores we cannot compute yet — surfaced as explicit unknowns,
-        # never faked (§20.10). The drawing/self-improve loop carries these through.
+        # Phase 12: §14 site scores — real when the site-context module computed
+        # them, explicit unknowns (with the module's reason) otherwise (§20.10).
         for name in PHASE10_SCORE_HOOKS:
-            scores[name] = Score.unknown_score(
-                name, reason="not_computable_until_phase_10_data_modules"
-            )
+            scores[name] = self._site_score(name)
         for u in self.extra_unknowns:
             # Stash arbitrary upstream unknowns under a stable key prefix.
             scores[f"unknown::{u}"] = Score.unknown_score(f"unknown::{u}", reason=u)
@@ -118,6 +125,32 @@ class ScoreEvaluator:
     # ------------------------------------------------------------------ #
     # Individual scores
     # ------------------------------------------------------------------ #
+    def _site_score(self, name: str) -> Score:
+        """Map a Phase 12 SiteScore onto the §14 Score model (hook consumer).
+
+        Accepts any object with the ``SiteScore`` attribute surface (duck-typed:
+        plot_agent must not depend on plot_planning internals beyond the public
+        dataclass). No site data / module didn't run → explicit unknown.
+        """
+        site = (self.site_scores or {}).get(name)
+        if site is None:
+            return Score.unknown_score(
+                name, reason="site_context_not_run_for_this_analysis_mode"
+            )
+        unknown = bool(getattr(site, "unknown", False))
+        value = getattr(site, "value", None)
+        if unknown or value is None:
+            reason = getattr(site, "unknown_reason", None) or "source_data_absent"
+            return Score.unknown_score(name, reason=str(reason))
+        return Score(
+            name=name,
+            value=round(float(value), 4),
+            unknown=False,
+            confidence=float(getattr(site, "confidence", 0.0)),
+            positive_factors=list(getattr(site, "positive_factors", [])),
+            negative_factors=list(getattr(site, "negative_factors", [])),
+        )
+
     def _buildability(self, ctx: AnalysisContext) -> Score:
         """buildable-envelope area / parcel area, adjusted by proposed-footprint fit (§8.4)."""
         parcel_area = ctx.parcel_area_m2()

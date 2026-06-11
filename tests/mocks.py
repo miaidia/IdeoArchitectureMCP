@@ -21,7 +21,15 @@ from typing import Any
 import httpx
 import respx
 from plot_agent.analysis import Connectors
-from plot_agent.analysis.connectors import RiskLayerFetch, RiskLayerSource, WFSRiskLayerSource
+from plot_agent.analysis.connectors import (
+    BuildingsFetch,
+    NeighborBuildingsSource,
+    RiskLayerFetch,
+    RiskLayerSource,
+    TerrainFetch,
+    TerrainSource,
+    WFSRiskLayerSource,
+)
 from plot_connectors import (
     BBox,
     InMemoryCache,
@@ -172,19 +180,93 @@ class MockRiskLayerSource(RiskLayerSource):
         )
 
 
+@dataclass
+class MockTerrainSource(TerrainSource):
+    """A mock Phase 12 terrain source serving a fixture GeoTIFF (TEST FIXTURE)."""
+
+    raster_bytes: bytes | None = None
+    fail: bool = False
+    storage_uri: str = "artifact://test/terrain/dem.tif"
+
+    async def fetch(self, bbox: BBox) -> TerrainFetch:
+        if self.fail or self.raster_bytes is None:
+            return TerrainFetch(
+                status=ResultStatus.SOURCE_UNAVAILABLE,
+                raster_bytes=None,
+                storage_uri=None,
+                result=None,
+                source_id="src.terrain:test",
+                detail="TEST FIXTURE: simulated WCS timeout",
+            )
+        rec = _test_source_record("src.terrain:test", legal=LegalStatus.INFORMATIVE, conf=0.8)
+        return TerrainFetch(
+            status=ResultStatus.OK,
+            raster_bytes=self.raster_bytes,
+            storage_uri=self.storage_uri,
+            result=NormalizedResult(status=ResultStatus.OK, source_record=rec),
+            source_id=rec.source_id,
+        )
+
+
+@dataclass
+class MockBuildingsSource(NeighborBuildingsSource):
+    """A mock Phase 12 neighbor-buildings source (BDOT10k-shaped features)."""
+
+    features: list[dict[str, Any]] = field(default_factory=list)
+    fail: bool = False
+
+    async def fetch(self, bbox: BBox) -> BuildingsFetch:
+        if self.fail:
+            return BuildingsFetch(
+                status=ResultStatus.SOURCE_UNAVAILABLE,
+                features=[],
+                result=None,
+                source_id="src.buildings:test",
+                detail="TEST FIXTURE: simulated WFS timeout",
+            )
+        rec = _test_source_record("src.buildings:test", legal=LegalStatus.INFORMATIVE, conf=0.8)
+        return BuildingsFetch(
+            status=ResultStatus.OK if self.features else ResultStatus.NOT_DETECTED,
+            features=list(self.features),
+            result=NormalizedResult(
+                status=ResultStatus.OK if self.features else ResultStatus.NOT_DETECTED,
+                source_record=rec,
+            ),
+            source_id=rec.source_id,
+        )
+
+
 def mock_connectors(
     *,
     parcel_wkt: str = DEFAULT_PARCEL_WKT,
     uldk_fail: bool = False,
     feature_geoms: dict[RiskKind, list[dict[str, Any]]] | None = None,
     unavailable: set[RiskKind] | None = None,
+    terrain_raster: bytes | None = None,
+    terrain_fail: bool = False,
+    building_features: list[dict[str, Any]] | None = None,
+    buildings_fail: bool = False,
 ) -> Connectors:
-    """Build a pure-mock :class:`Connectors` bundle (zero network)."""
+    """Build a pure-mock :class:`Connectors` bundle (zero network).
+
+    Phase 12: pass ``terrain_raster`` (fixture GeoTIFF bytes) / ``building_features``
+    to enable the site-context sources; leave them ``None`` to model unconfigured
+    sources (quick-screening tests are unaffected). ``terrain_fail``/``buildings_fail``
+    simulate a dead source (kill-one-connector tests, NFR-REL-001).
+    """
+    terrain: TerrainSource | None = None
+    if terrain_raster is not None or terrain_fail:
+        terrain = MockTerrainSource(raster_bytes=terrain_raster, fail=terrain_fail)
+    buildings: NeighborBuildingsSource | None = None
+    if building_features is not None or buildings_fail:
+        buildings = MockBuildingsSource(features=building_features or [], fail=buildings_fail)
     return Connectors(
         uldk=MockULDKConnector(parcel_wkt=parcel_wkt, fail=uldk_fail),  # type: ignore[arg-type]
         risk_layers=MockRiskLayerSource(
             feature_geoms=feature_geoms or {}, unavailable=unavailable or set()
         ),
+        terrain=terrain,
+        buildings=buildings,
     )
 
 

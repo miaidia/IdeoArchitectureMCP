@@ -15,7 +15,9 @@ Builds, ONCE per proposal, everything the validators consume:
 * **obstructor parts** — every segment footprint extruded to its own height
   (floors × ``floor_height_m`` config, ``basis: industry_heuristic``) plus the
   optional neighbor buildings (geometry + explicit height) from BDOT10k or user
-  input (live fetch is Phase 12; here they arrive as a typed list).
+  input — they arrive as a typed list (the Phase 12 site-context pipeline builds
+  them from the fetched BDOT10k features via
+  ``plot_planning.site_context.neighbors_from_features``).
 
 The module is duck-typed against :class:`plot_agent.drawing.proposal
 .MasterplanProposal` via structural protocols (dependency direction §9.4:

@@ -24,6 +24,7 @@ carries an EvidenceItem (source_id + retrieved_at) or an explicit ``no_source`` 
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -143,6 +144,33 @@ def _evidence_for_run(evidence: list[EvidenceItem], analysis_id: str) -> list[Ev
     return out
 
 
+@dataclass
+class ScreeningInternals:
+    """Intermediate screening artifacts the Phase 12 full pipeline builds on.
+
+    ``run_full_due_diligence`` reuses the SAME fetched layers/envelope (one fetch
+    per theme — no duplicate network calls) to drive the site-context modules.
+    """
+
+    parcel_geom: BaseGeometry | None = None
+    registry: RulesetRegistry | None = None
+    bbox: BBox | None = None
+    risk_layers: dict[RiskKind, RiskLayer] = field(default_factory=dict)
+    layer_status: dict[str, str] = field(default_factory=dict)
+    envelope_geom: BaseGeometry | None = None
+    any_source_failed: bool = False
+
+    def layer_geoms(self, kind: RiskKind) -> list[BaseGeometry] | None:
+        """Geometries for a theme; ``None`` when the source was UNAVAILABLE (§21)."""
+        if self.layer_status.get(kind.value) == "source_unavailable":
+            return None
+        layer = self.risk_layers.get(kind)
+        return list(layer.geometries) if layer is not None else []
+
+    def status_of(self, kind: RiskKind) -> str:
+        return self.layer_status.get(kind.value, "source_unavailable")
+
+
 async def run_quick_screening(
     input: AnalysisInput,
     *,
@@ -161,6 +189,34 @@ async def run_quick_screening(
     (Phase 8) defaults to :data:`plot_planning.DEFAULT_PLANNING_STORE` — when it holds
     parsed APP/GML zones intersecting the parcel, the planning block reports real
     coverage instead of the pending note.
+    """
+    result, _internals = await run_screening_with_internals(
+        input,
+        connectors=connectors,
+        ruleset_dir=ruleset_dir,
+        ruleset_registry=ruleset_registry,
+        analysis_id=analysis_id,
+        artifact_store=artifact_store,
+        planning_store=planning_store,
+    )
+    return result
+
+
+async def run_screening_with_internals(
+    input: AnalysisInput,
+    *,
+    connectors: Connectors,
+    ruleset_dir: str = "rulesets/PL",
+    ruleset_registry: RulesetRegistry | None = None,
+    analysis_id: str | None = None,
+    artifact_store: Any | None = None,
+    planning_store: Any | None = None,
+) -> tuple[AnalysisResult, ScreeningInternals]:
+    """The screening pipeline, additionally returning :class:`ScreeningInternals`.
+
+    Phase 12: the full-due-diligence pipeline builds its site-context modules on
+    the SAME fetched layers (one fetch per theme). Behaviour of the returned
+    result is byte-identical to :func:`run_quick_screening`.
     """
     analysis_id = analysis_id or str(uuid.uuid4())
     registry = ruleset_registry or load_rulesets(ruleset_dir)
@@ -183,7 +239,10 @@ async def run_quick_screening(
     if parcel_geom is None:
         # Cannot do geometry work without a parcel; return a partial result that is still
         # useful (NFR-REL-010) — the parcel resolution unknown is recorded.
-        return _no_parcel_result(analysis_id, parcel_obj, evidence, sources)
+        return (
+            _no_parcel_result(analysis_id, parcel_obj, evidence, sources),
+            ScreeningInternals(registry=registry, any_source_failed=any_source_failed),
+        )
 
     # ----------------------------------------------------------------- #
     # 2) Geometry metrics (plot_geo).
@@ -200,6 +259,7 @@ async def run_quick_screening(
     # ----------------------------------------------------------------- #
     bbox = _parcel_bbox(parcel_geom)
     risk_layers: list[RiskLayer] = []
+    risk_layers_by_kind: dict[RiskKind, RiskLayer] = {}
     layer_status: dict[str, str] = {}
     precision_by_source: dict[str, GeometryPrecision] = {}
 
@@ -218,16 +278,16 @@ async def run_quick_screening(
             evidence.extend(_evidence_for_run(fetch.result.evidence, analysis_id))
         if fetch.status is ResultStatus.OK and fetch.result is not None:
             geoms = _features_to_geoms(fetch.result, parcel_geom)
-            risk_layers.append(
-                RiskLayer(
-                    kind=kind,
-                    geometries=geoms,
-                    status="ok",
-                    source_id=fetch.result.source_record.source_id,
-                    source_legal_status=fetch.result.source_record.legal_status,
-                    source_confidence=fetch.result.source_record.confidence,
-                )
+            layer = RiskLayer(
+                kind=kind,
+                geometries=geoms,
+                status="ok",
+                source_id=fetch.result.source_record.source_id,
+                source_legal_status=fetch.result.source_record.legal_status,
+                source_confidence=fetch.result.source_record.confidence,
             )
+            risk_layers.append(layer)
+            risk_layers_by_kind[kind] = layer
         else:
             # not_detected / confirmed_absent: theme checked & clear (NOT unavailable).
             not_detected_kinds.append(kind)
@@ -312,7 +372,16 @@ async def run_quick_screening(
     result.planning["_sources"] = [s.model_dump(mode="json") for s in sources]
     result.planning["_risk_layer_status"] = layer_status
     result.planning["_geometry_metrics"] = metrics
-    return result
+    internals = ScreeningInternals(
+        parcel_geom=parcel_geom,
+        registry=registry,
+        bbox=bbox,
+        risk_layers=risk_layers_by_kind,
+        layer_status=layer_status,
+        envelope_geom=shape(envelope.geometry) if envelope.geometry else None,
+        any_source_failed=any_source_failed,
+    )
+    return result, internals
 
 
 # --------------------------------------------------------------------------- #

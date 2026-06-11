@@ -40,7 +40,9 @@ async def test_map_preview_returns_inline_image_content_block(
 ) -> None:
     mcp = _load_server(monkeypatch)
     async with create_connected_server_and_client_session(mcp) as client:
-        result = await client.call_tool("map_preview", {"analysis_id": "demo-1"})
+        # No analysis_id → the documented Phase 3 sample preview. (An UNKNOWN id
+        # is a hard error since the review m1 fix — no silent sample fallback.)
+        result = await client.call_tool("map_preview", {})
 
     assert result.isError is False
     # Exactly one content block, and it is an MCP image block (Phase 0.2).

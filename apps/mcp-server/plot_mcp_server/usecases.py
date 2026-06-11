@@ -52,7 +52,7 @@ from plot_domain.enums import (
 # Marker version so reload is observable in tests/diagnostics even when ruleset
 # content is unchanged. Bump-by-reload is verified via the registry hash, but this
 # string also lets a test confirm the module object was re-imported.
-USECASES_BUILD = "phase11b-architect-loop"
+USECASES_BUILD = "phase12-site-context"
 
 PHASE7_NOTE = "Stub: analysis logic lands in Phase 7; MCP delegates to the worker in Phase 12."
 
@@ -146,17 +146,33 @@ def parcel_resolve(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def parcel_analyze(payload: AnalysisInput, ruleset_version: str) -> AnalysisResult:
-    """Run the analysis. quick_screening → the real §27 use-case (Phase 7 §C/§E).
+    """Run the analysis (Phase 7 §C/§E + Phase 12).
 
-    Other modes (full/design/portfolio) are not yet implemented; for them we run the
-    quick_screening pipeline and mark the gap in unknowns (never a fabricated full result).
+    * ``quick_screening`` → :func:`plot_agent.analysis.run_quick_screening`;
+    * ``full_due_diligence`` (Phase 12) → :func:`plot_agent.analysis
+      .run_full_due_diligence`: the screening pipeline PLUS the site-context
+      modules (terrain/water/geology/environment/heritage/roads/utilities/
+      neighborhood) over the same fetched layers, §14 scores wired, typed site
+      context stored for the masterplan integration;
+    * other modes (design/portfolio) run the quick pipeline (never a fabricated
+      full result — their gap stays visible in the result contents).
+
     The completed result is stored in the in-memory store so ``analysis_get_result`` /
     ``report_generate`` / ``risks_list`` / ``sources_collect`` can return it.
     """
+    from plot_agent.analysis import DEFAULT_SITE_CONTEXT_STORE, run_full_due_diligence
+
     connectors = _get_connectors()
     analysis_id = _new_id()
 
     async def _analyze() -> AnalysisResult:
+        if payload.analysis_mode is AnalysisMode.FULL_DUE_DILIGENCE:
+            return await run_full_due_diligence(
+                payload,
+                connectors=connectors,
+                analysis_id=analysis_id,
+                site_store=DEFAULT_SITE_CONTEXT_STORE,
+            )
         return await run_quick_screening(
             payload,
             connectors=connectors,
@@ -824,6 +840,33 @@ def report_generate(
     }
 
 
+def map_preview_render(analysis_id: str | None, fmt: str = "png") -> Any:
+    """Render the inline map for ``map_preview`` (Phase 3 channel + Phase 12 layers).
+
+    A STORED analysis renders its real buildable-envelope map — including the
+    Phase 12 site-context layers (flood/landslide/heritage as hard/soft
+    constraint layers, utility networks as the NETWORK layer — the
+    ``render_envelope_map`` role mapping). An UNKNOWN id is a hard error
+    (review m1, matching ``propose_layout``'s ``_context_for`` semantics): a
+    sample render is visually indistinguishable from the real map, so falling
+    back silently would fake analysis output (§21). Only the documented no-id
+    call renders the Phase 3 sample preview. Returns a
+    ``plot_reports.RenderResult``.
+    """
+    from plot_reports import render_envelope_map, render_preview
+
+    if analysis_id is None:
+        return render_preview(analysis_id=None, fmt="png" if fmt != "svg" else "svg")
+    result = DEFAULT_STORE.get(analysis_id)
+    if result is None:
+        raise ValueError(
+            f"analysis_id '{analysis_id}' nie istnieje w magazynie analiz — najpierw "
+            "uruchom parcel_analyze; map_preview bez analysis_id renderuje "
+            "przykładowy podgląd (Phase 3)."
+        )
+    return render_envelope_map(result, fmt="png" if fmt != "svg" else "svg")
+
+
 def _variant_lineage_entries(variant: Any) -> list[dict[str, Any]]:
     """Audit entries that produced ``variant`` — its variant-id parent chain (F1).
 
@@ -834,8 +877,8 @@ def _variant_lineage_entries(variant: Any) -> list[dict[str, Any]]:
     reported variant backwards and renders ONLY those entries' rationales, in
     chronological order. Every MCP masterplan iteration stores a variant, so the
     chain has no gaps; entries from other analyses/sessions can never appear.
-    Today all propose_layout calls share :data:`ADHOC_ANALYSIS_ID` — distinct
-    analyses are already isolated, and real per-analysis ids arrive in Phase 12.
+    Since Phase 12 a bound ``propose_layout(analysis_id=...)`` stamps real
+    analysis ids; unbound calls still share :data:`ADHOC_ANALYSIS_ID`.
     """
     from plot_agent.drawing import DEFAULT_MASTERPLAN_AUDIT
 
@@ -875,8 +918,9 @@ def _report_koncepcja(
       §11.1.6 + review fix F1: never another session's rationales).
 
     The plan render (renderer v2 WITH the stage-table panel) uses the same parcel
-    geometry the variant was scored against (the drawing context — propose_layout
-    is adhoc-bound until Phase 12, documented there). The Markdown is returned
+    geometry the variant was scored against: the variant's OWN analysis context
+    when it was analysis-bound (Phase 12), else the unbound drawing context (test
+    seam / Phase 3 sample). The Markdown is returned
     inline (small text, like ``md``) and also served by the variant-scoped
     ``analysis://{analysis_id}/masterplan/{variant_id}/report.md`` resource —
     the variant-scoped resource was chosen over reusing ``analysis://{id}/report.md``
@@ -888,10 +932,10 @@ def _report_koncepcja(
     from plot_reports import get_artifact_store, render_koncepcja_markdown, render_masterplan
 
     aid = analysis_id or ADHOC_ANALYSIS_ID
-    # Variant resolution (F1): an explicit variant_id is honoured as-is (the E2E
-    # session reports an adhoc-bound variant under its real analysis id — Phase 12
-    # binds propose_layout to the analysis); WITHOUT one, "latest" may only pick a
-    # variant of THIS analysis — never another session's most recent variant.
+    # Variant resolution (F1): an explicit variant_id is honoured as-is (it may be
+    # an adhoc-bound variant reported under a real analysis id — legacy sessions);
+    # WITHOUT one, "latest" may only pick a variant of THIS analysis — never
+    # another session's most recent variant.
     variant = (
         DEFAULT_VARIANT_STORE.get(variant_id)
         if variant_id
@@ -914,7 +958,23 @@ def _report_koncepcja(
     metadata = variant.metadata if isinstance(variant.metadata, dict) else {}
 
     # Plan render with the per-stage table panel (renderer v2, Phase 9 §9.1.4).
-    context = _drawing_context()
+    # Phase 12: a variant bound to a stored analysis renders on THAT analysis'
+    # geometry; otherwise the unbound drawing context (test seam / sample).
+    # Review m2: a BOUND variant whose analysis vanished / lost its parcel
+    # geometry is a hard error (like ``_context_for``) — rendering the bound
+    # koncepcja on the Phase 3 sample geometry would silently misrepresent the
+    # deliverable (§21). Unbound (adhoc/legacy) variants keep the sample path.
+    if bool(metadata.get("analysis_bound")) and variant.analysis_id is not None:
+        context = _analysis_drawing_context(variant.analysis_id)
+        if context is None:
+            raise ValueError(
+                f"Wariant '{variant.id}' jest związany z analizą "
+                f"'{variant.analysis_id}', której nie ma w magazynie analiz albo "
+                "nie ma geometrii działki — koncepcja nie może być wyrenderowana "
+                "na geometrii przykładowej; ponownie uruchom parcel_analyze."
+            )
+    else:
+        context = _drawing_context()
     render = render_masterplan(
         variant,
         context.parcel_geom(),
@@ -1060,10 +1120,10 @@ def monitoring_create(scope: str, target_id: str, purpose: str) -> dict[str, Any
     }
 
 
-#: The analysis id the masterplan path of ``propose_layout`` evaluates under —
-#: the ONLY production consumer of the OverrideStore until propose_layout is
-#: analysis-bound (Phase 12). ``manual_override`` may honestly report
-#: ``applied``/``active`` only for overrides recorded under this id (§21).
+#: The analysis id the masterplan path of ``propose_layout`` evaluates under when
+#: NOT analysis-bound. Since Phase 12 ``propose_layout(analysis_id=...)`` also
+#: evaluates under STORED analysis ids, so ``manual_override`` may honestly report
+#: ``applied``/``active`` for this id OR any analysis present in the store (§21).
 ADHOC_ANALYSIS_ID = "adhoc"
 
 
@@ -1088,12 +1148,14 @@ def manual_override(
 
     §21 honesty (two conditions for ``applied=True`` / ``status="active"``):
     the rule must be consumed by the Phase 10 validators AND ``analysis_id``
-    must actually be queried by a production path — that is
-    :data:`ADHOC_ANALYSIS_ID` (``"adhoc"``) until ``propose_layout`` becomes
-    analysis-bound (Phase 12). Anything else is ``recorded`` with a note
-    explaining when it will activate. ``after`` must explicitly carry a valid
-    new ``status`` — NOTHING is defaulted (§21) and an invalid status is
-    rejected at the tool boundary.
+    must actually be queryable by a production path — that is
+    :data:`ADHOC_ANALYSIS_ID` (``"adhoc"``, the unbound ``propose_layout``
+    path) or, since Phase 12, ANY analysis id present in the analysis store
+    (``propose_layout(analysis_id=...)`` evaluates under it). An id of an
+    analysis that does not exist is ``recorded`` with a note explaining when
+    it will activate. ``after`` must explicitly carry a valid new ``status``
+    — NOTHING is defaulted (§21) and an invalid status is rejected at the
+    tool boundary.
     """
     from plot_planning.wt_validators import CONSUMED_RULE_IDS
     from plot_rules import DEFAULT_OVERRIDE_STORE, RuleStatus, override_subject
@@ -1142,37 +1204,41 @@ def manual_override(
         created_at=_now(),
     )
     DEFAULT_OVERRIDE_STORE.put(override)
-    # Phase 10: the wt_validators evaluation path consumes DEFAULT_OVERRIDE_STORE
+    # Phase 10/12: the wt_validators evaluation path consumes DEFAULT_OVERRIDE_STORE
     # (matched by analysis_id + rule_id [+ subject] → plot_rules.evaluate
     # override hook, F-0137) for the inter-building WT/ppoż rules. applied/active
     # may ONLY be claimed when BOTH the rule is consumed AND the analysis_id is
-    # actually queried by a production path — propose_layout evaluates under
-    # ADHOC_ANALYSIS_ID until it is analysis-bound (Phase 12). Anything else is
+    # reachable by a production path — the unbound propose_layout evaluates under
+    # ADHOC_ANALYSIS_ID, and since Phase 12 propose_layout(analysis_id=...)
+    # evaluates under any STORED analysis id. Anything else is
     # recorded-but-not-yet-consumable (§21 honesty).
     rule_part, _, _ = target_id.partition("#")
     subject = override_subject(target_id)
     consumed_rule = rule_part in CONSUMED_RULE_IDS
-    analysis_consumable = analysis_id == ADHOC_ANALYSIS_ID
+    analysis_consumable = analysis_id == ADHOC_ANALYSIS_ID or DEFAULT_STORE.has(analysis_id)
     applied = consumed_rule and analysis_consumable
     scope = f"subject:{subject}" if subject else "rule-wide"
     if applied:
+        bound_via = (
+            "pod analysis_id='adhoc' (ścieżka niezwiązana z analizą)"
+            if analysis_id == ADHOC_ANALYSIS_ID
+            else f"pod analysis_id='{analysis_id}' (propose_layout analysis-bound, Phase 12)"
+        )
         note = (
             "Override zapisany z pełnym audytem (F-0138) i AKTYWNY "
             f"(zakres: {scope}): walidatory między-budynkowe Phase 10 konsumują "
-            "OverrideStore dla tej reguły pod analysis_id='adhoc' — jedyną "
-            "ścieżką produkcyjną do czasu powiązania propose_layout z analizą "
-            "(Phase 12). Wynik nadpisany przy najbliższej ewaluacji, z audytem "
-            "w trace; override bez sufiksu '#podmiot' obejmuje CAŁĄ regułę "
-            "(rule-wide)."
+            f"OverrideStore dla tej reguły {bound_via}. Wynik nadpisany przy "
+            "najbliższej ewaluacji, z audytem w trace; override bez sufiksu "
+            "'#podmiot' obejmuje CAŁĄ regułę (rule-wide)."
         )
     elif consumed_rule:
         note = (
             "Override zapisany z pełnym audytem (F-0138), ale jeszcze NIE "
-            f"konsumowany: jedyna ścieżka produkcyjna (propose_layout) ewaluuje "
-            f"pod analysis_id='{ADHOC_ANALYSIS_ID}', a ten override dotyczy "
-            f"analysis_id='{analysis_id}'. Aktywuje się, gdy ewaluacja zostanie "
-            "powiązana z tym analysis_id (propose_layout analysis-bound — "
-            "Phase 12) — applied=False (§21)."
+            f"konsumowany: analysis_id='{analysis_id}' nie istnieje w magazynie "
+            "analiz, więc żadna ścieżka produkcyjna pod nim nie ewaluuje. "
+            "Aktywuje się, gdy parcel_analyze utworzy analizę o tym id i "
+            "propose_layout(analysis_id=...) zostanie pod nim wywołane — "
+            "applied=False (§21)."
         )
     else:
         note = (
@@ -1236,18 +1302,19 @@ def _connector_health_stub() -> list[dict[str, Any]]:
 # Phase 4 generative drawing loop wiring (§4.1.C). propose_layout validates a typed
 # LayoutProposal against hard constraints, renders it, scores+critiques it, and returns
 # the structured result; the server inlines the PNG image content block so the model
-# SEES its drawing (reuses the Phase 3 image path). Geometry is the Phase 3 sample
-# parcel/envelope/constraints until Phase 7 supplies real analysis geometry.
+# SEES its drawing (reuses the Phase 3 image path). Since Phase 12 the tool is
+# ANALYSIS-BINDABLE: an explicit ``analysis_id`` makes parcel/envelope/indicators/
+# context come from the STORED analysis; without one the legacy adhoc path (sample
+# geometry / injected test context) is byte-compatible.
 # --------------------------------------------------------------------------- #
 # Injectable drawing context for propose_layout/report koncepcja (same idiom as
-# set_connectors): production stays on the Phase 3 sample geometry until
-# propose_layout becomes analysis-bound (Phase 12); tests inject the golden-parcel
-# AnalysisContext so the scripted architect session runs on real fixture geometry.
+# set_connectors): tests inject an AnalysisContext; it applies ONLY to the
+# UNBOUND (adhoc) path — an explicit analysis_id always wins (Phase 12 binding).
 _DRAWING_CONTEXT: Any | None = None
 
 
 def set_drawing_context(context: Any | None) -> None:
-    """Override the AnalysisContext used by the drawing paths (tests inject fixtures)."""
+    """Override the AnalysisContext used by the UNBOUND drawing paths (test seam)."""
     global _DRAWING_CONTEXT
     _DRAWING_CONTEXT = context
 
@@ -1277,10 +1344,63 @@ def _drawing_context(ruleset_dir: str | None = None) -> Any:
     )
 
 
+def _analysis_drawing_context(analysis_id: str) -> Any | None:
+    """Build an AnalysisContext from a STORED analysis (Phase 12 delta 3 binding).
+
+    Parcel + buildable envelope + hard/soft constraint geometries come from the
+    stored :class:`AnalysisResult` (the same data the analysis tools report).
+    Returns ``None`` when the analysis is missing or carries no parcel geometry.
+    """
+    from plot_agent import AnalysisContext
+    from shapely.geometry import shape
+
+    result = DEFAULT_STORE.get(analysis_id)
+    if result is None or result.parcel is None or result.parcel.geometry is None:
+        return None
+    parcel = shape(result.parcel.geometry)
+    env = result.buildable_envelope
+    envelope = shape(env.geometry) if env is not None and env.geometry else parcel
+    hard: list[Any] = []
+    soft: list[Any] = []
+    for con in result.constraints:
+        if con.geometry is None:
+            continue
+        geom = shape(con.geometry)
+        if geom.is_empty:
+            continue
+        (hard if bool(con.machine_summary.get("hard")) else soft).append(geom)
+    return AnalysisContext.with_loaded_rules(
+        parcel=parcel,
+        buildable_envelope=envelope,
+        hard_constraints=hard,
+        soft_constraints=soft,
+    )
+
+
+def _context_for(analysis_id: str | None) -> Any:
+    """Resolve the drawing context: analysis-bound when an id is given (Phase 12).
+
+    Precedence (documented): explicit ``analysis_id`` → the stored analysis (a
+    missing/geometry-less analysis raises a clear error — never a silent fall
+    back to sample geometry, §21); no id → the injected test context or the
+    Phase 3 sample.
+    """
+    if analysis_id is None:
+        return _drawing_context()
+    context = _analysis_drawing_context(analysis_id)
+    if context is None:
+        raise ValueError(
+            f"analysis_id '{analysis_id}' nie istnieje w magazynie analiz albo nie ma "
+            "geometrii działki — najpierw uruchom parcel_analyze (Phase 12 binding)."
+        )
+    return context
+
+
 def propose_layout_render(
     proposal_payload: dict[str, Any],
     indicators: dict[str, Any] | list[dict[str, Any]] | None = None,
     rationale: str | None = None,
+    analysis_id: str | None = None,
 ) -> dict[str, Any]:
     """Validate + render + score + critique a typed proposal (§4.1.C / §4.4; Phase 9).
 
@@ -1296,13 +1416,20 @@ def propose_layout_render(
     ``rationale`` (Phase 11 §11.1.6) is the model's free-text design reasoning for
     this iteration: it is persisted in the audit record and surfaced in the
     deliverable ONLY — validators/scoring/critique never receive it (NFR-SEC-003).
+
+    ``analysis_id`` (Phase 12 delta 3) BINDS the evaluation to a stored analysis:
+    parcel/envelope/constraints come from that analysis (not the sample context),
+    indicators default to its parsed planning indicators, variants/audit/overrides
+    scope to it, and the site-context masterplan checks (earthworks per building,
+    per-stage flood clip, heritage interventions, zjazd KDW) run when the analysis
+    has stored site context. Without an id the legacy adhoc path is unchanged.
     """
     if "buildings" in proposal_payload or proposal_payload.get("schema_version") == 2:
-        return _propose_masterplan_render(proposal_payload, indicators, rationale)
+        return _propose_masterplan_render(proposal_payload, indicators, rationale, analysis_id)
 
     from plot_agent.drawing import DrawingLoop, LayoutProposal
 
-    context = _drawing_context()
+    context = _context_for(analysis_id)
     # Parse/validate the proposal — malformed/out-of-range input fails here (typed guard).
     proposal = LayoutProposal.model_validate(proposal_payload)
     loop = DrawingLoop(context=context)
@@ -1323,13 +1450,135 @@ def propose_layout_render(
     }
 
 
+def _masterplan_site_checks(
+    site_context: Any | None, context: Any, proposal: Any
+) -> dict[str, Any] | None:
+    """Phase 12 delta 1: site-context checks for a BOUND masterplan iteration.
+
+    Consumes the typed :class:`plot_planning.site_context.SiteContext` stored by
+    ``parcel_analyze(full_due_diligence)``:
+
+    * **earthworks_per_building** — terrain slope inside each footprint → risk
+      class (unknown when the terrain raster is absent — never "flat by default");
+    * **flood_stages** — per-stage flood flags + envelope area after the flood
+      clip (stages whose buildings stand in a flood zone are flagged);
+    * **heritage_interventions** — ``zabytek_do_remontu`` → konserwator question;
+      new buildings inside a heritage zone → warning (soft, validator-style);
+    * **zjazd** — the KDW network must reach the parcel frontage at a public
+      road (fail = masterplan has no legal access point);
+    * **utility_collisions** — buildings/roads crossing technical zones;
+    * **neighbor_shading** — impact report TO neighbors, REUSING the §60 sun
+      engine (soft; thresholds/window read from the wt-60 ruleset).
+
+    Returns ``None`` when no site context is bound (unbound/adhoc evaluation).
+    """
+    if site_context is None:
+        return None
+    from plot_planning.site_context import (
+        check_zjazd_kdw,
+        heritage_interventions,
+        neighbor_shading_impact,
+    )
+    from plot_planning.wt_validators import ValidatorConfig
+    from plot_planning.wt_validators.config import RULE_WT60, rule_threshold
+    from plot_planning.wt_validators.context import NEW_STATUSES, ObstructorPart
+
+    checks: dict[str, Any] = {}
+    envelope_geom = context.envelope_geom()
+    buildings_named = [
+        (b.name, str(b.status), b.footprint_geometry()) for b in proposal.buildings
+    ]
+
+    # Terrain → earthworks risk per building (delta 1).
+    terrain = site_context.terrain
+    if terrain is not None:
+        checks["earthworks_per_building"] = {
+            name: terrain.earthworks_for_footprint(geom)
+            for name, _status, geom in buildings_named
+        }
+
+    # Flood → per-stage envelope clipping + flags (delta 1).
+    water = site_context.water
+    if water is not None:
+        checks["flood_stages"] = water.stage_flood_checks(
+            envelope_geom,
+            [(b.name, b.stage, b.footprint_geometry()) for b in proposal.buildings],
+        )
+
+    # Heritage → zabytek_do_remontu / new-in-zone warnings (delta 1).
+    checks["heritage_interventions"] = heritage_interventions(
+        site_context.environment, buildings_named
+    )
+
+    # Roads → KDW zjazd connection point (delta 1).
+    access = site_context.access
+    kdw = [
+        (f"kdw-{i + 1}", r.centerline_geometry())
+        for i, r in enumerate(proposal.roads)
+        if str(r.function) == "kdw"
+    ]
+    checks["zjazd"] = check_zjazd_kdw(
+        kdw,
+        context.parcel_geom(),
+        access._road_geom if access is not None else None,
+    )
+
+    # Utilities → technical-zone collisions vs proposal buildings + roads.
+    if access is not None:
+        elements: list[tuple[str, Any]] = [(n, g) for n, _s, g in buildings_named]
+        elements += [
+            (f"droga-{i + 1}", r.to_polygon()) for i, r in enumerate(proposal.roads)
+        ]
+        checks["utility_collisions"] = access.network_collisions(elements)
+
+    # Neighbor shading impact (soft) — REUSES the §60 engine; window + minimum
+    # come from the wt-60 ruleset (legal values never live in code).
+    neighbors = list(site_context.neighbors)
+    if neighbors:
+        cfg = ValidatorConfig()
+        rule = context.ruleset.get(RULE_WT60)
+        if rule is not None:
+            def _parts(*, new: bool) -> list[Any]:
+                return [
+                    ObstructorPart(
+                        owner=b.name,
+                        geometry=seg.geometry(),
+                        height_m=int(seg.floors) * cfg.floor_height_m,
+                        source="proposal",
+                        is_new=new,
+                    )
+                    for b in proposal.buildings
+                    if (b.status in NEW_STATUSES) is new
+                    for seg in b.segments
+                ]
+
+            checks["neighbor_shading"] = neighbor_shading_impact(
+                _parts(new=True),
+                neighbors,
+                config=cfg,
+                window_start_h=rule_threshold(rule, "dwelling_window_start_h"),
+                window_end_h=rule_threshold(rule, "dwelling_window_end_h"),
+                min_required_hours=rule_threshold(rule, "min_hours_equinox"),
+                # Review m3: the proposal's EXISTING on-parcel buildings are
+                # obstructor context in BOTH runs — only the NEW parts may be
+                # charged with insolation loss.
+                existing_parts=_parts(new=False),
+            )
+        else:
+            checks["neighbor_shading"] = [
+                {"status": "unknown", "reason": "wt60_rule_missing"}
+            ]
+    return checks
+
+
 def _propose_masterplan_render(
     proposal_payload: dict[str, Any],
     indicators: dict[str, Any] | list[dict[str, Any]] | None = None,
     rationale: str | None = None,
+    analysis_id: str | None = None,
 ) -> dict[str, Any]:
     """Masterplan path of ``propose_layout`` (Phase 9 §9.1 + Phase 10 §10.1.7 +
-    Phase 11 §11.1.3): one iteration of the generative masterplan loop v2.
+    Phase 11 §11.1.3 + Phase 12 binding): one iteration of the masterplan loop v2.
 
     The :class:`plot_agent.drawing.DrawingLoop` runs the full pipeline —
     ingest-validate → capacity metrics → inter-building WT/ppoż validators →
@@ -1337,13 +1586,21 @@ def _propose_masterplan_render(
     (rule ids + subjects + capacity gap vs the base-scenario target) → renderer v2
     (violation overlay) → exemplar learn → audit (F-0446 with inputs hash +
     rationale). Audited expert overrides from
-    :data:`plot_rules.DEFAULT_OVERRIDE_STORE` are consumed under the ``"adhoc"``
-    analysis id (propose_layout is not yet analysis-bound — Phase 12). Variant
-    metrics are stored in :data:`plot_agent.drawing.DEFAULT_VARIANT_STORE` and
-    served by the ``analysis://{analysis_id}/masterplan/{variant_id}/metrics.json``
-    resource; the audit entry (with the model's ``rationale``) is appended to
+    :data:`plot_rules.DEFAULT_OVERRIDE_STORE` are consumed under the evaluation's
+    analysis id: the BOUND ``analysis_id`` when given (Phase 12 delta 3) or the
+    legacy ``"adhoc"`` id. Variant metrics are stored in
+    :data:`plot_agent.drawing.DEFAULT_VARIANT_STORE` and served by the
+    ``analysis://{analysis_id}/masterplan/{variant_id}/metrics.json`` resource;
+    the audit entry (with the model's ``rationale``) is appended to
     :data:`plot_agent.drawing.DEFAULT_MASTERPLAN_AUDIT` for the koncepcja report.
+
+    Phase 12 delta 1 (analysis-bound only): when the bound analysis has a stored
+    site context, the loop receives the BDOT10k ``neighbors`` (so §13/§60 account
+    for neighbor shadows) and the result carries ``site_checks`` — earthworks
+    risk per building, per-stage flood envelope clipping, heritage-intervention
+    warnings (``zabytek_do_remontu`` → konserwator) and the KDW zjazd check.
     """
+    from plot_agent.analysis import DEFAULT_SITE_CONTEXT_STORE
     from plot_agent.drawing import (
         DEFAULT_MASTERPLAN_AUDIT,
         DEFAULT_VARIANT_STORE,
@@ -1355,17 +1612,27 @@ def _propose_masterplan_render(
     from plot_rules import DEFAULT_OVERRIDE_STORE
     from shapely.geometry import mapping
 
-    context = _drawing_context()
+    aid = analysis_id if analysis_id is not None else ADHOC_ANALYSIS_ID
+    context = _context_for(analysis_id)
+    site_context = (
+        DEFAULT_SITE_CONTEXT_STORE.get(analysis_id) if analysis_id is not None else None
+    )
     # Ingest validation (make_valid / finite coords / EPSG:2180 plausibility) runs in
     # the Pydantic validators; buildings-within-parcel is a SCORING-time violation.
     proposal = MasterplanProposal.model_validate(proposal_payload)
+    if indicators is None and analysis_id is not None:
+        # Phase 12 binding: indicators default to the STORED analysis' parsed
+        # planning indicators; an explicit argument always wins.
+        stored = DEFAULT_STORE.get(analysis_id)
+        if stored is not None and isinstance(stored.planning, dict):
+            indicators = stored.planning.get("indicators")
     indicator_map = _indicator_map(indicators)
     # Seed the critique's "improved vs previous iteration" comparison from the last
     # masterplan audit entry OF THIS ANALYSIS — each propose_layout call builds a
     # fresh loop, so the cross-call session continuity lives in the chronological
     # audit log; entries from other analyses/sessions are never consulted (F1).
     # The seeding entry's variant id is also this iteration's lineage parent.
-    previous_entries = DEFAULT_MASTERPLAN_AUDIT.entries(analysis_id=ADHOC_ANALYSIS_ID)
+    previous_entries = DEFAULT_MASTERPLAN_AUDIT.entries(analysis_id=aid)
     previous_entry = previous_entries[-1] if previous_entries else None
     previous_components = (
         dict(previous_entry.get("components") or {}) if previous_entry else None
@@ -1375,9 +1642,12 @@ def _propose_masterplan_render(
         context=context,
         indicators=indicator_map,
         override_store=DEFAULT_OVERRIDE_STORE,
-        analysis_id=ADHOC_ANALYSIS_ID,
+        analysis_id=aid,
         artifact_store=get_artifact_store(),  # same store as the variant artifact
         previous_components=previous_components,
+        # Phase 12 §10.1.6: bound analyses contribute their BDOT10k neighbors so
+        # §13/§60 see neighbor shadows (the validators' existing `neighbors` API).
+        neighbors=tuple(site_context.neighbors) if site_context is not None else (),
     )
     result = loop.iterate_masterplan(proposal, rationale=rationale)
     metrics = result.metrics
@@ -1398,12 +1668,14 @@ def _propose_masterplan_render(
     )
     artifact_uri = get_artifact_store().put_render(f"masterplan/{variant_id}.png", render)
     unknowns_json = [u.model_dump(mode="json") for u in metrics.unknowns]
+    # Phase 12 delta 1: site-context masterplan checks for BOUND analyses.
+    site_checks = _masterplan_site_checks(site_context, context, proposal)
     variant = MasterplanVariant(
         id=variant_id,
-        # Owning-analysis stamp (F1): today every propose_layout call is adhoc-bound
-        # (ADHOC_ANALYSIS_ID; real ids Phase 12) — the koncepcja report + latest()
-        # resolve variants per analysis, never across sessions.
-        analysis_id=ADHOC_ANALYSIS_ID,
+        # Owning-analysis stamp (F1): the BOUND analysis id when given (Phase 12),
+        # else the legacy adhoc id — the koncepcja report + latest() resolve
+        # variants per analysis, never across sessions.
+        analysis_id=aid,
         buildings=[
             BuildingRecord(
                 id=f"bld:{variant_id}:{i + 1}",
@@ -1431,6 +1703,11 @@ def _propose_masterplan_render(
             "config_basis": metrics.config_basis,
             "ruleset_version": context.ruleset.ruleset_version,
             "zabudowa_srodmiejska": proposal.zabudowa_srodmiejska,
+            # Phase 12 binding marker (review m2): True only for an explicit
+            # ``propose_layout(analysis_id=...)`` evaluation — the koncepcja
+            # report hard-errors when a BOUND variant's analysis geometry is
+            # gone instead of silently rendering on the sample geometry.
+            "analysis_bound": analysis_id is not None,
             # Phase 10: the WT/ppoż rule outcomes travel with the stored variant
             # (served by the metrics.json resource — full trace + evidence).
             "inter_building_checks": checks_json,
@@ -1443,6 +1720,9 @@ def _propose_masterplan_render(
             # Lineage pointer (F1): the previous iteration of the SAME analysis
             # (the audit entry that seeded previous_components), None for the first.
             "parent_variant_id": parent_variant_id,
+            # Phase 12 delta 1: site-context masterplan checks (None when unbound
+            # or the analysis has no stored site context — honest absence).
+            "site_checks": site_checks,
         },
     )
     DEFAULT_VARIANT_STORE.put(variant)
@@ -1475,7 +1755,11 @@ def _propose_masterplan_render(
         "exemplar_id": result.exemplar.exemplar_id if result.exemplar else None,
         "metrics": metrics.to_dict(),
         "unknowns": unknowns_json,
-        "metrics_resource": f"analysis://{ADHOC_ANALYSIS_ID}/masterplan/{variant_id}/metrics.json",
+        "analysis_id": aid,
+        # Phase 12 delta 1: site-context checks (earthworks / flood stages /
+        # heritage interventions / zjazd) — None when no site context is bound.
+        "site_checks": site_checks,
+        "metrics_resource": f"analysis://{aid}/masterplan/{variant_id}/metrics.json",
         # Phase 10: full WT/ppoż rule outcomes (trace + geometry evidence) + the
         # render's style-metadata sidecar (the violation overlay layer is auditable
         # there too — NFR-AUD-009; persisted at <artifact>.style.json).

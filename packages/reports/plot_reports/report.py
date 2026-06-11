@@ -247,11 +247,18 @@ def render_envelope_map(
             continue
         hard = bool(con.machine_summary.get("hard"))
         tr = removed_index.get(con.constraint_id)
+        # Phase 12 site-context layer mapping: utility networks get the dedicated
+        # NETWORK role (distinct style); flood/landslide/heritage stay on the
+        # hard/soft constraint roles their overlay policy assigned (one legend).
+        if con.constraint_type == "utilities":
+            role = LayerRole.NETWORK
+        else:
+            role = LayerRole.CONSTRAINT_HARD if hard else LayerRole.CONSTRAINT_SOFT
         layers.append(
             Layer(
                 name=con.constraint_type,
                 geometries=[con.geometry],
-                role=LayerRole.CONSTRAINT_HARD if hard else LayerRole.CONSTRAINT_SOFT,
+                role=role,
                 removed_area_m2=(tr.get("removed_m2") if tr else con.applies_to_area_m2),
                 removed_area_percent=(tr.get("removed_percent") if tr else con.applies_to_percent),
             )

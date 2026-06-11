@@ -101,6 +101,26 @@ def _solar_samples(
     )
 
 
+def solar_window_samples(
+    config: ValidatorConfig, start_h: float, end_h: float
+) -> tuple[tuple[float, float], ...]:
+    """Public wrapper over the cached pvlib solar samples (Phase 12 reuse).
+
+    The site-context neighbor-shading module reuses the §60 machinery
+    (ShadowField + these samples) for the with/without impact comparison —
+    plan PHASE 12 delta 1 ("do not re-implement").
+    """
+    return _solar_samples(
+        config.site_lat,
+        config.site_lon,
+        config.equinox_date,
+        start_h,
+        end_h,
+        config.sun_step_min,
+        config.timezone,
+    )
+
+
 def shadow_polygon(
     footprint: BaseGeometry, height_m: float, elevation_deg: float, azimuth_deg: float
 ) -> BaseGeometry:
@@ -271,8 +291,9 @@ def check_naslonecznienie(
             # an existing building's pre-existing insolation deficit is not
             # attributable to this investment (shadows still come from ALL parts —
             # existing + neighbors shade the new windows). Neighbor-impact baseline
-            # attribution (new shadow on existing dwellings) needs a with/without
-            # comparison against live neighbor data — Phase 12 (documented scope).
+            # attribution (new shadow on existing dwellings) is the Phase 12
+            # with/without comparison in
+            # plot_planning.site_context.neighbor_shading_impact (soft report).
             continue
         override = find_override(
             overrides, analysis_id, RULE_WT60, subject=building.name

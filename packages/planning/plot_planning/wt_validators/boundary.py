@@ -24,7 +24,8 @@ geometric inputs:
 
 Documented assumption: the WHOLE parcel boundary is treated as a granica z
 sąsiednią działką budowlaną (§12 ust. 10 — boundary with a road parcel is
-exempt — needs neighbor-parcel data, Phase 12); conservative until then.
+exempt — needs EGiB neighbor-PARCEL geometry, which is still not wired; the
+Phase 12 site context fetches neighbor BUILDINGS only); conservative until then.
 
 Output: one FAIL RuleCheck per violating wall (evidence = the wall line), or a
 single PASS summary per building citing its binding (smallest-margin) wall.

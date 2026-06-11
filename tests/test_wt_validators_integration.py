@@ -118,14 +118,14 @@ def test_manual_override_is_consumed_audited_and_applied(registry) -> None:
         user_id="ekspert@example.com",
         after={"status": "pass", "confidence": 0.95},
     )
-    # §21 honesty (M3): the rule is consumed, but the ONLY production path
-    # (propose_layout) evaluates under analysis_id="adhoc" — an override
-    # recorded under "an-wt-1" cannot be consumed by it yet, so the tool may
-    # not claim applied/active; the note explains when it activates.
+    # §21 honesty (M3, Phase 12 semantics): the rule is consumed, but
+    # "an-wt-1" is NOT a stored analysis, so no production path
+    # (propose_layout(analysis_id=...) / the adhoc path) evaluates under it —
+    # the tool may not claim applied/active; the note explains when it activates.
     assert out["applied"] is False
     assert out["status"] == "recorded"
     assert out["audit_logged"] is True
-    assert "adhoc" in out["note"]
+    assert "propose_layout(analysis_id=...)" in out["note"]
 
     # An explicit evaluation under the SAME analysis id does consume it (audited).
     after = [
@@ -169,8 +169,9 @@ def test_manual_override_adhoc_analysis_is_active() -> None:
 
 
 def test_manual_override_other_analysis_recorded_until_bound() -> None:
-    # M3: any other analysis id is recorded-but-not-yet-consumable — the note
-    # states when it will activate (analysis-bound evaluation, Phase 12).
+    # M3 (Phase 12 semantics): an analysis id NOT present in the analysis store
+    # is recorded-but-not-yet-consumable — the note states when it activates
+    # (parcel_analyze creating the analysis + a bound propose_layout call).
     from plot_mcp_server import usecases
 
     out = usecases.manual_override(
@@ -183,7 +184,8 @@ def test_manual_override_other_analysis_recorded_until_bound() -> None:
     )
     assert out["applied"] is False
     assert out["status"] == "recorded"
-    assert "an:1234" in out["note"] and "adhoc" in out["note"]
+    assert "an:1234" in out["note"]
+    assert "propose_layout(analysis_id=...)" in out["note"]
 
 
 # --------------------------------------------------------------------------- #

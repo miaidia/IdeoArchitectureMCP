@@ -364,9 +364,10 @@ def monitoring_create(
         "scope it to ONE evaluation subject (building name; 'pair:A|B' with "
         "names sorted for pairwise par. 271 checks; 'parking:N' for par. 19). "
         "applied=True/'active' only when the rule is consumed by the Phase 10 "
-        "validators AND analysis_id is actually evaluated by a production path "
-        "(= 'adhoc' until propose_layout is analysis-bound, Phase 12); "
-        "otherwise the override is recorded and activates later."
+        "validators AND analysis_id is reachable by a production path: 'adhoc' "
+        "(unbound propose_layout) or a STORED analysis id (Phase 12 "
+        "propose_layout(analysis_id=...) binding); otherwise the override is "
+        "recorded and activates later."
     ),
 )
 def manual_override(
@@ -374,9 +375,10 @@ def manual_override(
         str,
         Field(
             description=(
-                "Analysis run id. Only 'adhoc' is consumed by a production "
-                "path today (propose_layout); other ids are recorded and "
-                "activate once evaluation is analysis-bound (Phase 12)."
+                "Analysis run id: 'adhoc' (unbound propose_layout) or the id of "
+                "a stored parcel_analyze run (consumed by analysis-bound "
+                "propose_layout, Phase 12); ids of non-existent analyses are "
+                "recorded and activate once the analysis exists."
             )
         ),
     ],
@@ -424,7 +426,7 @@ def manual_override(
     structured_output=False,  # return an image content block, not structured JSON
 )
 def map_preview(
-    analysis_id: Annotated[str | None, Field(description="Analysis run id (sample geometry until Phase 7).")] = None,
+    analysis_id: Annotated[str | None, Field(description="Analysis run id — a stored analysis renders its real map incl. site-context layers (flood/landslide/heritage/networks, Phase 12); an unknown id is an error; omit for the sample preview.")] = None,
     fmt: Annotated[str, Field(description="png (inline image) — svg returns the markup as text.")] = "png",
     *,
     ctx: Context[ServerSession, AppContext],
@@ -435,9 +437,9 @@ def map_preview(
     # .venv/.../mcp/server/fastmcp/utilities/types.py:44 to_image_content() and
     # .venv/.../mcp/server/fastmcp/utilities/func_metadata.py:524 (_convert_to_content
     # returns [result.to_image_content()] for an Image).
-    from plot_reports import render_preview
-
-    result = render_preview(analysis_id=analysis_id, fmt="png" if fmt != "svg" else "svg")
+    # Phase 12: delegates to the reloadable use-case so a STORED analysis renders
+    # its real buildable-envelope map with the site-context layer mapping.
+    result = _app(ctx).usecases.map_preview_render(analysis_id, fmt)
     # Image(format="png") → mimeType "image/png" (types.py _get_mime_type).
     return Image(data=result.data, format="png" if result.mime_type == "image/png" else "svg")
 
@@ -504,10 +506,24 @@ def propose_layout(
             )
         ),
     ] = None,
+    analysis_id: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Phase 12 analysis binding: id of a STORED parcel_analyze run. When "
+                "given, parcel/envelope/constraints/indicators come from that "
+                "analysis (not the sample context); variants, audit lineage and "
+                "manual_override scoping use this id; site-context checks "
+                "(earthworks per building, per-stage flood clip, heritage "
+                "interventions, KDW zjazd, neighbor shading) run when the analysis "
+                "was a full_due_diligence. Omit for the legacy adhoc evaluation."
+            )
+        ),
+    ] = None,
     *,
     ctx: Context[ServerSession, AppContext],
 ) -> CallToolResult:
-    out = _app(ctx).usecases.propose_layout_render(proposal, indicators, rationale)
+    out = _app(ctx).usecases.propose_layout_render(proposal, indicators, rationale, analysis_id)
     # Inline the rendered PNG as an image content block (Phase 0.2 image path).
     image = Image(data=out["png_bytes"], format="png").to_image_content()
     structured = {
@@ -537,6 +553,10 @@ def propose_layout(
         # when the iteration was accepted into the persisted memory (§11.1.4).
         "rationale",
         "exemplar_id",
+        # Phase 12: the bound analysis id + the site-context masterplan checks
+        # (earthworks/flood-stages/heritage/zjazd/utility collisions/shading).
+        "analysis_id",
+        "site_checks",
     ):
         if key in out:
             structured[key] = out[key]

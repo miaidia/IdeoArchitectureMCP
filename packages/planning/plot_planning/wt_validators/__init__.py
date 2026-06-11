@@ -106,8 +106,9 @@ def run_inter_building_checks(
     """Run ALL Phase 10 inter-building validators over a masterplan proposal.
 
     Parameters mirror the per-validator contracts; ``neighbors`` are existing
-    buildings outside the proposal (geometry + height — Phase 12 wires the live
-    BDOT10k fetch), ``srodmiejska`` defaults to the proposal's own flag,
+    buildings outside the proposal (geometry + height — built from the fetched
+    BDOT10k features by ``plot_planning.site_context.neighbors_from_features``
+    since Phase 12), ``srodmiejska`` defaults to the proposal's own flag,
     ``metrics`` lets the caller REUSE already-computed Phase 9 capacity metrics
     (recomputed here otherwise), ``strefa_pozarowa_limit_m2`` enables the §273
     joint-strefa exemption (not in the YAML corpus — caller-supplied or absent

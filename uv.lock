@@ -1756,24 +1756,28 @@ version = "0.2.0"
 source = { editable = "packages/planning" }
 dependencies = [
     { name = "jsonschema" },
+    { name = "numpy" },
     { name = "plot-domain" },
     { name = "plot-geo" },
     { name = "plot-rules" },
     { name = "pvlib" },
     { name = "py-straight-skeleton" },
     { name = "pydantic" },
+    { name = "rasterio" },
     { name = "shapely" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "jsonschema", specifier = ">=4.21" },
+    { name = "numpy", specifier = ">=1.26" },
     { name = "plot-domain", editable = "packages/domain" },
     { name = "plot-geo", editable = "packages/geo" },
     { name = "plot-rules", editable = "packages/rules" },
     { name = "pvlib", specifier = ">=0.15.1" },
     { name = "py-straight-skeleton", specifier = ">=0.1.0" },
     { name = "pydantic", specifier = ">=2" },
+    { name = "rasterio", specifier = ">=1.4" },
     { name = "shapely", specifier = ">=2.0" },
 ]
 
