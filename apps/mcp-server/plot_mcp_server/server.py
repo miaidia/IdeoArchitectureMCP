@@ -161,12 +161,24 @@ def parcel_analyze(
 
 
 @mcp.tool(annotations=_READ_ONLY, description="Return status, progress and partial results.")
-def analysis_get_status(
-    analysis_id: Annotated[str, Field(description="Analysis run id.")],
+async def analysis_get_status(
+    analysis_id: Annotated[str, Field(description="Analysis run id (or task-graph/batch id).")],
     *,
     ctx: Context[ServerSession, AppContext],
 ) -> dict[str, Any]:
-    return _app(ctx).usecases.analysis_get_status(analysis_id)
+    status = _app(ctx).usecases.analysis_get_status(analysis_id)
+    # Phase 13 (F-0434): stream the orchestrator's node-level progress to the
+    # client. Context.report_progress(progress, total, message) is the Phase 0.1
+    # API (mcp/server/fastmcp/server.py: async def report_progress — it no-ops
+    # without a client progressToken, so this is always safe to call).
+    progress = status.get("progress")
+    if isinstance(progress, int | float):
+        message = status.get("status")
+        review = status.get("awaiting_review")
+        if isinstance(review, dict):
+            message = f"awaiting_review: {review.get('what_to_review')}"
+        await ctx.report_progress(float(progress) * 100.0, 100.0, message)
+    return status
 
 
 @mcp.tool(annotations=_READ_ONLY, description="Return structured result for an analysis run.")
@@ -350,10 +362,31 @@ def monitoring_create(
     scope: Annotated[str, Field(description="municipality | parcel | analysis.")],
     target_id: Annotated[str, Field(description="Id of the entity to monitor.")],
     purpose: Annotated[str, Field(description="Explicit purpose for the write (§16, NFR-SEC-010).")],
+    interval_hours: Annotated[
+        float | None,
+        Field(
+            description=(
+                "Check interval in hours, must be > 0 (default from settings; "
+                "§4.5) — a non-positive interval is rejected (it would make "
+                "the monitor always due)."
+            )
+        ),
+    ] = None,
+    webhook_url: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Optional alert webhook. POSTs go through the EXISTING egress "
+                "allowlist (F-0418) — a non-allowlisted host is blocked."
+            )
+        ),
+    ] = None,
     *,
     ctx: Context[ServerSession, AppContext],
 ) -> dict[str, Any]:
-    return _app(ctx).usecases.monitoring_create(scope, target_id, purpose)
+    return _app(ctx).usecases.monitoring_create(
+        scope, target_id, purpose, interval_hours, webhook_url
+    )
 
 
 @mcp.tool(
@@ -367,7 +400,13 @@ def monitoring_create(
         "validators AND analysis_id is reachable by a production path: 'adhoc' "
         "(unbound propose_layout) or a STORED analysis id (Phase 12 "
         "propose_layout(analysis_id=...) binding); otherwise the override is "
-        "recorded and activates later."
+        "recorded and activates later. Phase 13: target_type='task_graph_gate' "
+        "+ target_id=<graph_id> + after={'status': 'approved'|'rejected', "
+        "'node_id': '<gate>'} resolves a PAUSED task-graph manual-review gate "
+        "(approve continues, reject aborts; audited). node_id must name the "
+        "pending gate and analysis_id must own the graph — a mismatch is an "
+        "audited gate_mismatch/analysis_mismatch rejection, so a duplicate "
+        "approval can never silently approve the next gate."
     ),
 )
 def manual_override(
@@ -571,6 +610,16 @@ def propose_layout(
 
 @mcp.tool(annotations=_READ_ONLY, description="Run diagnostics for debugging and QA.")
 def diagnostics_run(
+    probe_connectors: Annotated[
+        bool,
+        Field(
+            description=(
+                "Run live connector healthchecks (F-0441 autotest; network). "
+                "False (default) lists connectors as not_probed — zero network."
+            )
+        ),
+    ] = False,
+    *,
     ctx: Context[ServerSession, AppContext],
 ) -> dict[str, Any]:
     app = _app(ctx)
@@ -581,6 +630,7 @@ def diagnostics_run(
         last_reload_at=app.last_reload_at.isoformat() if app.last_reload_at else None,
         server_version=app.server_version,
         ruleset_errors=list(app.ruleset_registry.errors),
+        probe_connectors=probe_connectors,
     )
 
 

@@ -95,6 +95,7 @@ async def run_full_due_diligence(
     if internals.parcel_geom is None or internals.registry is None:
         # No parcel geometry → the screening partial result IS the full result
         # (site modules need geometry; the resolution unknown is already recorded).
+        _store_freshness_verdict(result)
         return result
 
     parcel = internals.parcel_geom
@@ -391,9 +392,33 @@ async def run_full_due_diligence(
     ):
         result.status = AnalysisStatus.MANUAL_REVIEW_REQUIRED
 
+    _store_freshness_verdict(result)
     if site_store is not None:
         site_store.put(result.analysis_id, site)
     return result
+
+
+def _store_freshness_verdict(result: AnalysisResult) -> None:
+    """Stamp the source-freshness verdict on the analysis (review M2; F-0439/0443).
+
+    The verdict (``planning['_freshness']``: per-source staleness + ``degraded``
+    + ``stale_sources``) is what the analysis-bound ``propose_layout`` path
+    reads to FORCE conservative rule evaluation when the sources behind the
+    analysis are stale or unverifiable — freshness can only tighten the
+    consumer's mode, never relax it (§21 safe failure).
+    """
+    if not isinstance(result.planning, dict):  # pragma: no cover - defensive
+        return
+    from plot_agent.monitoring.freshness import source_freshness
+
+    sources = result.planning.get("_sources") or []
+    report = source_freshness(sources)
+    verdict = report.to_dict()
+    if not sources:
+        # Fail-safe (§21): zero visible sources is never "fresh".
+        verdict["degraded"] = True
+        verdict["reason"] = "no_sources_visible"
+    result.planning["_freshness"] = verdict
 
 
 def _outside(parcel: Any, feature: dict[str, Any]) -> bool:

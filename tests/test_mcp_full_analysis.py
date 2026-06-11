@@ -412,6 +412,94 @@ def test_propose_layout_unknown_analysis_id_raises_clearly() -> None:
         )
 
 
+# --------------------------------------------------------------------------- #
+# Review M2 (F-0443/0445): the freshness verdict is stored at full-DD time and
+# CONSUMED by the analysis-bound propose_layout path — real path, no manual
+# mode passing.
+# --------------------------------------------------------------------------- #
+def test_drawing_loop_passes_evaluation_mode_into_inter_building_checks(
+    tmp_path: Any,
+) -> None:
+    """The loop's ``evaluation_mode`` genuinely reaches run_inter_building_checks
+    (trace-recorded by plot_rules.evaluate) — it is not hardcoded."""
+    from plot_agent.drawing import DrawingLoop, MasterplanProposal
+
+    result = _bound_analysis()
+    usecases.DEFAULT_STORE.put(result)
+    context = usecases._analysis_drawing_context(result.analysis_id)
+    proposal = MasterplanProposal.model_validate(_masterplan_payload())
+
+    def _modes(loop: Any) -> set[str]:
+        res = loop.iterate_masterplan(proposal)
+        return {
+            c.trace.get("mode")
+            for c in res.inter_building_checks
+            if isinstance(c.trace, dict) and c.trace.get("mode")
+        }
+
+    strict_loop = DrawingLoop(
+        context=context, evaluation_mode="strict", artifact_store_base=tmp_path
+    )
+    assert _modes(strict_loop) == {"strict"}
+    default_loop = DrawingLoop(context=context, artifact_store_base=tmp_path)
+    assert _modes(default_loop) == {"conservative"}  # the safe default
+
+
+def test_stale_bound_analysis_forces_conservative_checks_through_propose_layout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Review M2 regression: a bound analysis whose sources are STALE (per the
+    env max-age policy) stores a degraded freshness verdict at full-DD time,
+    and the bound propose_layout evaluates the inter-building checks under
+    conservative mode + surfaces the banner — the model SEES the basis."""
+    import plot_shared.config as cfg
+
+    monkeypatch.setenv("PLOT_SOURCE_MAX_AGE_DAYS", "1e-09")  # everything is stale
+    cfg.get_settings.cache_clear()
+    try:
+        result = _bound_analysis()
+    finally:
+        monkeypatch.delenv("PLOT_SOURCE_MAX_AGE_DAYS", raising=False)
+        cfg.get_settings.cache_clear()
+    verdict = result.planning["_freshness"]
+    assert verdict["degraded"] is True
+    assert verdict["stale_sources"]  # names the stale sources
+
+    usecases.DEFAULT_STORE.put(result)
+    out = usecases.propose_layout_render(
+        _masterplan_payload(), None, None, analysis_id=result.analysis_id
+    )
+    assert out["evaluation_mode"] == "conservative"
+    assert out["freshness"]["degraded"] is True
+    assert out["freshness"]["stale_sources"]
+    assert "tryb konserwatywny" in out["freshness"]["banner"]
+    # The checks were genuinely evaluated conservative (trace through the loop).
+    modes = {
+        c.get("trace", {}).get("mode")
+        for c in out["inter_building_checks"]
+        if c.get("trace", {}).get("mode")
+    }
+    assert modes == {"conservative"}
+
+
+def test_fresh_bound_analysis_reports_verdict_without_stale_banner() -> None:
+    """Fresh sources: the verdict travels with the result (degraded=False, no
+    banner) and the mode stays the validators' conservative default — freshness
+    never RELAXES the evaluation mode (§21)."""
+    result = _bound_analysis()
+    verdict = result.planning["_freshness"]
+    assert verdict["degraded"] is False
+    assert verdict["stale_sources"] == []
+
+    usecases.DEFAULT_STORE.put(result)
+    out = usecases.propose_layout_render(
+        _masterplan_payload(), None, None, analysis_id=result.analysis_id
+    )
+    assert out["evaluation_mode"] == "conservative"  # default, never relaxed
+    assert out["freshness"]["degraded"] is False
+    assert "banner" not in out["freshness"]
+
+
 def test_manual_override_scoped_to_stored_analysis_is_active() -> None:
     result = _bound_analysis()
     usecases.DEFAULT_STORE.put(result)

@@ -81,6 +81,11 @@ class AnalysisStore:
         with self._lock:
             return analysis_id in self._results
 
+    def all(self) -> list[AnalysisResult]:
+        """All stored results (Phase 13 diagnostics: source-freshness sweep)."""
+        with self._lock:
+            return list(self._results.values())
+
 
 #: A module-level default store so the MCP server shares one instance across tool calls
 #: within a process (it is reset on reload, which is fine for the dev/MVP gate).

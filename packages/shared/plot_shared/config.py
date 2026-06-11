@@ -78,6 +78,42 @@ class Settings(BaseSettings):
         description="Allowed connector egress host suffixes (F-0488/0489, §16). Never a wildcard.",
     )
 
+    # --- Workers / queue (Phase 13: Dramatiq + Redis; v1 Phase 11 §11.1.3) ---
+    queue_enabled: bool = Field(
+        default=False,
+        description=(
+            "Enable the Dramatiq Redis broker for async tasks (portfolio/monitoring/"
+            "cache-warm/full analysis). Off → use-cases run in-process (graceful "
+            "degradation); workers/tests use the StubBroker."
+        ),
+    )
+    queue_name: str = Field(
+        default="plot-analyzer",
+        description="Dramatiq queue name for the worker actors.",
+    )
+    backpressure_delay_s: float = Field(
+        default=0.0,
+        ge=0.0,
+        description=(
+            "Delay between sequential outbound fetches in batch/warm paths "
+            "(NFR-PERF-014 backpressure). 0 in dev/tests; deployments set "
+            "PLOT_BACKPRESSURE_DELAY_S to throttle against public services."
+        ),
+    )
+    source_max_age_days: float = Field(
+        default=90.0,
+        gt=0.0,
+        description=(
+            "Default max age for SourceRecord freshness (F-0439); staler sources "
+            "flip rule evaluation into conservative mode (F-0443/0445)."
+        ),
+    )
+    monitoring_default_interval_hours: float = Field(
+        default=24.0,
+        gt=0.0,
+        description="Default monitoring_create check interval (§4.5).",
+    )
+
     # --- Development / analysis defaults ---
     dev_hot_reload: bool = Field(
         default=False,

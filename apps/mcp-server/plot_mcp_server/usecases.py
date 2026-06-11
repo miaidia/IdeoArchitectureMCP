@@ -52,7 +52,7 @@ from plot_domain.enums import (
 # Marker version so reload is observable in tests/diagnostics even when ruleset
 # content is unchanged. Bump-by-reload is verified via the registry hash, but this
 # string also lets a test confirm the module object was re-imported.
-USECASES_BUILD = "phase12-site-context"
+USECASES_BUILD = "phase13-orchestration"
 
 PHASE7_NOTE = "Stub: analysis logic lands in Phase 7; MCP delegates to the worker in Phase 12."
 
@@ -185,11 +185,62 @@ def parcel_analyze(payload: AnalysisInput, ruleset_version: str) -> AnalysisResu
 
 
 def analysis_get_status(analysis_id: str) -> dict[str, Any]:
-    """Return real status for a stored analysis (Phase 7 §E).
+    """Return status + streaming progress for an analysis or task graph (Phase 13).
 
-    Streaming progress (``ctx.report_progress``) for long async runs lands in Phase 11;
-    quick_screening completes synchronously, so a stored run is already done.
+    Resolution order (F-0434 / NFR-PERF-010):
+
+    1. a TASK GRAPH whose graph id or bound analysis id matches → live graph
+       status (``running`` / ``awaiting_review`` incl. WHAT to review /
+       ``complete`` / ``aborted``), per-node progress and the ordered event
+       tail from the orchestrator status store (what ``ctx.report_progress``
+       streams in ``server.py``);
+    2. a stored completed analysis → the Phase 7 result-status shape;
+    3. neither → ``not_found`` (a normal answer, never an error).
     """
+    from plot_agent.orchestrator import DEFAULT_GRAPH_STORE, DEFAULT_STATUS_STORE
+
+    graph_state = DEFAULT_GRAPH_STORE.get(analysis_id)
+    if graph_state is None:
+        # The id may be the ANALYSIS id of a graph keyed under its own graph id.
+        for state in DEFAULT_GRAPH_STORE.all_states():
+            if state.analysis_id == analysis_id:
+                graph_state = state
+                break
+    if graph_state is not None:
+        events = DEFAULT_STATUS_STORE.events(graph_state.graph_id)
+        review: dict[str, Any] | None = None
+        if graph_state.pending_gate is not None:
+            gate_outcome = graph_state.outcomes.get(graph_state.pending_gate)
+            pending_review = graph_state.pending_review or {}
+            review = {
+                "node_id": graph_state.pending_gate,
+                "what_to_review": next(
+                    (
+                        e.get("detail")
+                        for e in reversed(events)
+                        if e.get("state") == "awaiting_review"
+                    ),
+                    graph_state.pending_gate,
+                ),
+                "review_payload_available": gate_outcome is not None,
+                # Review m6: the ACTUAL payload under review (size-capped at
+                # pause time by the orchestrator) — not just a flag.
+                "review_payload": pending_review.get("review_payload"),
+            }
+        node_states = {nid: o.status for nid, o in graph_state.outcomes.items()}
+        return {
+            "analysis_id": graph_state.analysis_id or analysis_id,
+            "graph_id": graph_state.graph_id,
+            "status": graph_state.status,
+            "progress": graph_state.progress(),
+            "nodes": node_states,
+            "awaiting_review": review,
+            "events": events[-20:],  # ordered tail (NFR-PERF-009: never unbounded)
+            "partial_available": any(
+                o.status in ("ok", "degraded") for o in graph_state.outcomes.values()
+            ),
+        }
+
     result = DEFAULT_STORE.get(analysis_id)
     if result is None:
         return {
@@ -1023,9 +1074,53 @@ def export_layers(analysis_id: str | None, fmt: str) -> dict[str, Any]:
 
 
 def portfolio_analyze(payload: dict[str, Any]) -> dict[str, Any]:
-    """Stub portfolio/batch analysis (§4.4; batch worker in Phase 11)."""
-    parcels = payload.get("parcels") or []
-    return {"batch_id": _new_id(), "submitted": len(parcels), "status": "queued", "note": PHASE7_NOTE}
+    """Real portfolio/batch analysis (Phase 13; §4.4, F-0419, NFR-REL-008).
+
+    * **Queued path** — when the env configures a broker (``PLOT_QUEUE_ENABLED``)
+      the batch is enqueued on the Dramatiq worker
+      (:func:`plot_worker.actors.portfolio_batch_task`) and the tool returns the
+      batch id immediately; progress streams via ``analysis_get_status(batch_id)``.
+    * **In-process fallback** (graceful degradation, no broker configured) —
+      :func:`plot_agent.portfolio.run_portfolio_analysis` runs synchronously
+      over the injected connectors and the FULL result (dedupe, ranking,
+      red-flag table, CSV/JSON/GeoJSON artifact uris) is returned inline.
+
+    One bad parcel never fails the batch (NFR-REL-008); duplicates are analyzed
+    once; sequential fan-out honours the backpressure delay (NFR-PERF-014).
+    """
+    from plot_shared import get_settings
+
+    parcels = list(payload.get("parcels") or [])
+    batch_id = f"batch:{uuid.uuid4().hex[:12]}"
+    if not parcels:
+        return {"batch_id": batch_id, "submitted": 0, "status": "empty", "items": []}
+
+    settings = get_settings()
+    if settings.queue_enabled:
+        from plot_worker import actors as worker_actors
+
+        worker_actors.portfolio_batch_task.send(batch_id, parcels)
+        return {
+            "batch_id": batch_id,
+            "submitted": len(parcels),
+            "status": "queued",
+            "note": (
+                "Batch w kolejce Dramatiq (PLOT_QUEUE_ENABLED) — postęp przez "
+                "analysis_get_status(batch_id); artefakty CSV/JSON/GeoJSON po "
+                "zakończeniu (F-0419)."
+            ),
+        }
+
+    from plot_agent.portfolio import run_portfolio_analysis
+
+    return _run_async(
+        run_portfolio_analysis(
+            parcels,
+            connectors=_get_connectors(),
+            batch_id=batch_id,
+            delay_s=settings.backpressure_delay_s,
+        )
+    )
 
 
 def ruleset_explain(registry: Any) -> dict[str, Any]:
@@ -1072,11 +1167,27 @@ def _rule_raw(rule: Any) -> dict[str, Any]:
 
 
 def source_healthcheck(source_id: str | None) -> dict[str, Any]:
-    """Stub external-source availability (§32 connectors land in Phase 6)."""
+    """Real external-source availability via the connector autotest (F-0441).
+
+    Runs the EXISTING Phase 6 ``healthcheck()`` contract (NFR-REL-005) over the
+    active connector bundle — the injected mock bundle in tests (zero network),
+    the production bundle in a live session. ``source_id`` filters by name /
+    connector source id; connectors without a healthcheck are reported as such,
+    never as healthy (§21).
+    """
+    from plot_agent.monitoring import connector_autotest
+
+    named = _named_connectors()
+    if source_id:
+        named = {
+            name: conn
+            for name, conn in named.items()
+            if name == source_id or getattr(conn, "source_id", None) == source_id
+        }
     return {
         "source_id": source_id,
-        "connectors": _connector_health_stub(),
-        "note": PHASE7_NOTE,
+        "connectors": _run_async(connector_autotest(named)),
+        "note": "Autotest connectorów przez kontrakt healthcheck() (F-0441, NFR-REL-005).",
     }
 
 
@@ -1084,8 +1195,37 @@ def source_healthcheck(source_id: str | None) -> dict[str, Any]:
 # Write / side-effecting surface (§16: explicit purpose + audit; annotated in server.py)
 # --------------------------------------------------------------------------- #
 def cache_warm(scope: str, target_id: str | None) -> dict[str, Any]:
-    """Stub cache warming for a municipality/parcel (§15.1; worker in Phase 11)."""
-    return {"scope": scope, "target_id": target_id, "warmed": False, "note": PHASE7_NOTE}
+    """Real cache warming for a parcel/municipality (Phase 13; NFR-PERF-011/014).
+
+    Queued via the Dramatiq worker when the env configures a broker; otherwise
+    runs in-process over the injected connectors. Layers are fetched
+    SEQUENTIALLY with the configured backpressure delay — never a parallel
+    hammer on public services (v1 §11.4 anti-pattern guard).
+    """
+    from plot_shared import get_settings
+
+    settings = get_settings()
+    if settings.queue_enabled:
+        from plot_worker import actors as worker_actors
+
+        worker_actors.cache_warm_task.send(scope, target_id)
+        return {
+            "scope": scope,
+            "target_id": target_id,
+            "status": "queued",
+            "note": "Nagrzewanie cache w kolejce Dramatiq (sekwencyjnie, z opóźnieniem).",
+        }
+
+    from plot_agent.warming import warm_cache as _warm
+
+    return _run_async(
+        _warm(
+            scope,
+            target_id,
+            connectors=_get_connectors(),
+            delay_s=settings.backpressure_delay_s,
+        )
+    )
 
 
 def document_ingest(analysis_id: str | None, file_id: str, purpose: str) -> dict[str, Any]:
@@ -1103,20 +1243,73 @@ def document_ingest(analysis_id: str | None, file_id: str, purpose: str) -> dict
     }
 
 
-def monitoring_create(scope: str, target_id: str, purpose: str) -> dict[str, Any]:
-    """Stub monitoring-profile creation for change detection (§4.5; worker in Phase 11).
+def monitoring_create(
+    scope: str,
+    target_id: str,
+    purpose: str,
+    interval_hours: float | None = None,
+    webhook_url: str | None = None,
+) -> dict[str, Any]:
+    """Real monitoring-profile creation (Phase 13; §4.5, F-0418).
 
-    ``purpose`` is the explicit-intent parameter required for write tools (§16,
-    NFR-SEC-010); a real implementation also writes an audit-log entry.
+    Registers a :class:`plot_agent.monitoring.Monitor` (scope/target/purpose/
+    interval/optional webhook) in the monitor store and writes an orchestrator
+    audit entry (``purpose`` is the §16/NFR-SEC-010 explicit intent). Checks
+    are executed by ``monitoring_check_task`` (worker) — the store exposes the
+    in-memory ``due()`` scheduler INTERFACE; real periodic triggering (cron)
+    is a deployment concern (documented, not faked). Webhook alerts POST
+    through the EXISTING egress allowlist — a non-allowlisted host is blocked
+    at check time (F-0418).
     """
+    from plot_agent.monitoring import create_monitor
+    from plot_agent.orchestrator import DEFAULT_ORCHESTRATOR_AUDIT
+    from plot_shared import get_settings
+
+    # Review m5: a non-positive interval would make the monitor ALWAYS due
+    # (every scheduler pass re-enqueues it) — rejected cleanly at the boundary.
+    if interval_hours is not None and not interval_hours > 0:
+        return {
+            "monitoring_id": None,
+            "scope": scope,
+            "target_id": target_id,
+            "purpose": purpose,
+            "active": False,
+            "audit_logged": False,
+            "status": "rejected_input",
+            "note": (
+                f"interval_hours={interval_hours} jest nieprawidłowe — interwał "
+                "kontroli musi być > 0 godzin (monitor z interwałem <= 0 byłby "
+                "zawsze 'due' i młóciłby źródła publiczne, NFR-PERF-014)."
+            ),
+        }
+    settings = get_settings()
+    hours = interval_hours if interval_hours else settings.monitoring_default_interval_hours
+    monitor = create_monitor(
+        scope,
+        target_id,
+        purpose,
+        interval_s=float(hours) * 3600.0,
+        webhook_url=webhook_url,
+    )
+    DEFAULT_ORCHESTRATOR_AUDIT.append(
+        {
+            "graph_id": None,
+            "analysis_id": None,
+            "event": "monitor_created",
+            "node_id": None,
+            "detail": monitor.config_echo(),
+            "at": _now().isoformat(),
+        }
+    )
     return {
-        "monitoring_id": _new_id(),
-        "scope": scope,
-        "target_id": target_id,
-        "purpose": purpose,
-        "active": False,
+        **monitor.config_echo(),
         "audit_logged": True,
-        "note": PHASE7_NOTE,
+        "note": (
+            "Monitor zarejestrowany (§4.5): worker monitoring_check_task wykonuje "
+            "kontrole; harmonogram okresowy (cron) to kwestia wdrożenia — magazyn "
+            "udostępnia interfejs due(). Webhook przechodzi przez allowlistę "
+            "egress (F-0418)."
+        ),
     }
 
 
@@ -1125,6 +1318,123 @@ def monitoring_create(scope: str, target_id: str, purpose: str) -> dict[str, Any
 #: evaluates under STORED analysis ids, so ``manual_override`` may honestly report
 #: ``applied``/``active`` for this id OR any analysis present in the store (§21).
 ADHOC_ANALYSIS_ID = "adhoc"
+
+
+def _gate_decision(
+    analysis_id: str,
+    graph_id: str,
+    reason: str,
+    user_id: str,
+    after: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Resolve a task-graph manual-review gate (Phase 13, F-0430/0437).
+
+    ``after.status`` must be an explicit ``approved`` / ``rejected`` AND
+    ``after.node_id`` must name the SPECIFIC gate being decided (review B1) —
+    nothing is defaulted (§21). A decision whose ``node_id`` is not the
+    currently pending gate is rejected as ``gate_mismatch`` (a duplicate MCP
+    approval retry must never silently approve the NEXT gate), and a decision
+    whose ``analysis_id`` does not own the graph is rejected as
+    ``analysis_mismatch`` (review M1). Approval resumes the graph from the
+    paused gate; rejection aborts it. Every path is audited (F-0446).
+    """
+    from plot_agent.orchestrator import (
+        DEFAULT_GRAPH_REGISTRY,
+        DEFAULT_ORCHESTRATOR_AUDIT,
+        GateMismatchError,
+    )
+
+    def _refused(status: str, note: str, **extra: Any) -> dict[str, Any]:
+        return {
+            "override_id": None,
+            "analysis_id": analysis_id,
+            "target_type": "task_graph_gate",
+            "target_id": graph_id,
+            "applied": False,
+            "audit_logged": bool(extra.pop("audit_logged", False)),
+            "status": status,
+            "note": note,
+            **extra,
+        }
+
+    status = (after or {}).get("status")
+    if status not in ("approved", "rejected"):
+        return _refused(
+            "rejected_input",
+            "Decyzja bramki wymaga jawnego after={'status': 'approved'|"
+            "'rejected', 'node_id': '<bramka>'} — nic nie jest domyślne "
+            "(§21, F-0437).",
+        )
+    gate_node = (after or {}).get("node_id")
+    if not gate_node or not isinstance(gate_node, str):
+        return _refused(
+            "rejected_input",
+            "Decyzja bramki wymaga jawnego after.node_id wskazującego "
+            "KONKRETNĄ bramkę (np. 'design_brief') — duplikat wywołania nie "
+            "może po cichu zatwierdzić następnej bramki (B1, §21).",
+        )
+    graph = DEFAULT_GRAPH_REGISTRY.get(graph_id)
+    if graph is None:
+        return _refused(
+            "graph_not_found",
+            f"Brak żywego grafu '{graph_id}' w rejestrze procesu — bramkę "
+            "można rozstrzygnąć tylko w procesie, który graf zbudował "
+            "(stan in-memory; trwała wznowa międzyprocesowa to Phase 14+).",
+        )
+    owner = graph.state.analysis_id
+    if analysis_id not in (graph_id, owner):
+        # Review M1: a gate decision must be bound to the graph it claims to
+        # decide — approving graph B while citing analysis A is rejected.
+        DEFAULT_ORCHESTRATOR_AUDIT.append(
+            {
+                "graph_id": graph_id,
+                "analysis_id": owner,
+                "event": "gate_analysis_mismatch",
+                "node_id": gate_node,
+                "detail": {"claimed_analysis_id": analysis_id, "reviewer": user_id},
+                "at": _now().isoformat(),
+            }
+        )
+        return _refused(
+            "analysis_mismatch",
+            f"analysis_id '{analysis_id}' nie jest właścicielem grafu "
+            f"'{graph_id}' (analiza grafu: {owner!r}) — decyzja bramki "
+            "odrzucona i zaudytowana (M1).",
+            audit_logged=True,
+        )
+    try:
+        state = graph.resume(
+            approved=status == "approved",
+            reason=reason,
+            reviewer=user_id,
+            expected_gate=gate_node,
+        )
+    except GateMismatchError as exc:
+        return _refused(
+            "gate_mismatch",
+            f"Bramka '{gate_node}' nie jest bramką oczekującą grafu "
+            f"'{graph_id}' (oczekuje: {exc.pending_gate!r}) — decyzja "
+            "odrzucona i zaudytowana; duplikat zatwierdzenia nigdy nie "
+            "przechodzi na kolejną bramkę (B1).",
+            pending_gate=exc.pending_gate,
+            audit_logged=True,
+        )
+    return {
+        "override_id": None,
+        "analysis_id": state.analysis_id or analysis_id,
+        "target_type": "task_graph_gate",
+        "target_id": graph_id,
+        "decision": status,
+        "applied": True,
+        "audit_logged": True,  # OrchestratorAudit gate_approved/gate_rejected (F-0446)
+        "status": state.status,
+        "pending_gate": state.pending_gate,
+        "note": (
+            "Bramka zatwierdzona — graf kontynuuje (F-0430)."
+            if status == "approved"
+            else "Bramka odrzucona — graf przerwany (aborted) z audytem (F-0430)."
+        ),
+    }
 
 
 def manual_override(
@@ -1157,6 +1467,15 @@ def manual_override(
     — NOTHING is defaulted (§21) and an invalid status is rejected at the
     tool boundary.
     """
+    # Phase 13 (F-0430/0437): task-graph gate decisions route to the orchestrator.
+    # target_type="task_graph_gate" + target_id=<graph_id> + after={"status":
+    # "approved"|"rejected", "node_id": "<gate>"} resumes/aborts the PAUSED graph
+    # — the decision binds to ONE named gate and to the owning analysis (B1/M1);
+    # fully audited (OrchestratorAudit), reusing this write tool instead of a new one
+    # (tool surface frozen at 22).
+    if target_type == "task_graph_gate":
+        return _gate_decision(analysis_id, target_id, reason, user_id, after)
+
     from plot_planning.wt_validators import CONSUMED_RULE_IDS
     from plot_rules import DEFAULT_OVERRIDE_STORE, RuleStatus, override_subject
 
@@ -1273,8 +1592,41 @@ def diagnostics_run(
     last_reload_at: str | None,
     server_version: str,
     ruleset_errors: list[str] | tuple[str, ...] = (),
+    probe_connectors: bool = False,
 ) -> dict[str, Any]:
-    """Self-diagnostics: loaded ruleset versions, schema errors, connector stubs, reload status."""
+    """Self-diagnostics (F-0442) extended by Phase 13 (F-0439–0446):
+
+    * **source freshness** — every SourceRecord referenced by the STORED
+      analyses vs the per-source max-age config (F-0439); degraded freshness
+      reports the safe-failure recommendation ``evaluation_mode=conservative``
+      (F-0443/0445);
+    * **ruleset freshness** — registry version + per-rule valid_from/valid_to
+      span vs today (F-0440);
+    * **connector autotest** (F-0441) — the EXISTING ``healthcheck()`` contract
+      over the active connector bundle; network probes run ONLY when
+      ``probe_connectors=True`` (the default report lists the connectors with
+      ``not_probed`` so diagnostics stays zero-network);
+    * **last task-graph failures** — recent failed nodes across graphs.
+    """
+    from plot_agent.monitoring import (
+        connector_autotest,
+        evaluation_mode_for,
+        ruleset_freshness,
+        source_freshness,
+    )
+    from plot_agent.orchestrator import DEFAULT_GRAPH_STORE
+    from plot_rules import load_rulesets
+
+    # Source freshness over every source record the stored analyses cite.
+    sources: list[dict[str, Any]] = []
+    for result in DEFAULT_STORE.all():
+        if isinstance(result.planning, dict):
+            sources.extend(result.planning.get("_sources") or [])
+    source_report = source_freshness(sources)
+
+    # Ruleset freshness from a FRESH load (hot-reload semantics, like _rule_raw).
+    ruleset_report = ruleset_freshness(load_rulesets("rulesets/PL"))
+
     return {
         "server_version": server_version,
         "usecases_build": USECASES_BUILD,
@@ -1284,18 +1636,39 @@ def diagnostics_run(
         "ruleset_errors": list(ruleset_errors),
         "dev_hot_reload": dev_hot_reload,
         "last_reload_at": last_reload_at,
-        "connectors": _connector_health_stub(),
+        "connectors": (
+            _run_async(connector_autotest(_named_connectors()))
+            if probe_connectors
+            else [
+                {"name": name, "status": "not_probed", "healthy": None}
+                for name in _named_connectors()
+            ]
+        ),
+        "source_freshness": source_report.to_dict(),
+        "ruleset_freshness": ruleset_report.to_dict(),
+        # Safe-failure recommendation (F-0443/0445): stale sources → conservative.
+        "evaluation_mode": evaluation_mode_for(source_report, default="strict"),
+        "task_graph_failures": DEFAULT_GRAPH_STORE.recent_failures(),
         "checked_at": _now().isoformat(),
     }
 
 
-def _connector_health_stub() -> list[dict[str, Any]]:
-    """Connector-health stub list (real probes land with connectors in Phase 6, §32)."""
-    return [
-        {"name": "uldk", "status": "unknown", "note": "probe lands in Phase 6"},
-        {"name": "geoportal_wms", "status": "unknown", "note": "probe lands in Phase 6"},
-        {"name": "app_gml", "status": "unknown", "note": "probe lands in Phase 6"},
-    ]
+def _named_connectors() -> dict[str, Any]:
+    """The active connector bundle as a name → connector map (F-0441 autotest).
+
+    Uses the INJECTED bundle when one is set (tests: mocks; healthcheck-less
+    mocks report ``no_healthcheck``), else the production bundle.
+    """
+    bundle = _get_connectors()
+    named: dict[str, Any] = {"uldk": bundle.uldk}
+    risk = bundle.risk_layers
+    for kind, connector in (getattr(risk, "connectors", None) or {}).items():
+        named[f"risk:{getattr(kind, 'value', kind)}"] = connector
+    if bundle.terrain is not None:
+        named["terrain"] = getattr(bundle.terrain, "connector", bundle.terrain)
+    if bundle.buildings is not None:
+        named["buildings"] = getattr(bundle.buildings, "connector", bundle.buildings)
+    return named
 
 
 # --------------------------------------------------------------------------- #
@@ -1599,6 +1972,13 @@ def _propose_masterplan_render(
     for neighbor shadows) and the result carries ``site_checks`` — earthworks
     risk per building, per-stage flood envelope clipping, heritage-intervention
     warnings (``zabytek_do_remontu`` → konserwator) and the KDW zjazd check.
+
+    Phase 13 review M2 (F-0443/0445): the bound analysis' stored source-
+    freshness verdict (``planning['_freshness']``, stamped at full-DD time)
+    drives the inter-building checks' rule-evaluation mode — a degraded verdict
+    FORCES ``conservative`` and the result carries ``evaluation_mode`` plus a
+    ``freshness`` block with a banner, so the model sees that stale sources
+    degraded the evaluation basis. Freshness never relaxes the mode.
     """
     from plot_agent.analysis import DEFAULT_SITE_CONTEXT_STORE
     from plot_agent.drawing import (
@@ -1620,13 +2000,39 @@ def _propose_masterplan_render(
     # Ingest validation (make_valid / finite coords / EPSG:2180 plausibility) runs in
     # the Pydantic validators; buildings-within-parcel is a SCORING-time violation.
     proposal = MasterplanProposal.model_validate(proposal_payload)
-    if indicators is None and analysis_id is not None:
-        # Phase 12 binding: indicators default to the STORED analysis' parsed
-        # planning indicators; an explicit argument always wins.
+    freshness_verdict: dict[str, Any] | None = None
+    if analysis_id is not None:
         stored = DEFAULT_STORE.get(analysis_id)
-        if stored is not None and isinstance(stored.planning, dict):
+        if indicators is None and stored is not None and isinstance(stored.planning, dict):
+            # Phase 12 binding: indicators default to the STORED analysis' parsed
+            # planning indicators; an explicit argument always wins.
             indicators = stored.planning.get("indicators")
+        if stored is not None and isinstance(stored.planning, dict):
+            # Review M2 (F-0443/0445): the analysis' stored source-freshness
+            # verdict (stamped at full-DD time) drives the rule-evaluation mode
+            # of the inter-building checks below.
+            raw_verdict = stored.planning.get("_freshness")
+            if isinstance(raw_verdict, dict):
+                freshness_verdict = raw_verdict
     indicator_map = _indicator_map(indicators)
+    # Freshness can only TIGHTEN the mode (§21): a degraded verdict forces
+    # "conservative"; a fresh or absent verdict keeps the validators' own
+    # conservative default — it is never relaxed to strict/optimistic here.
+    evaluation_mode = "conservative"
+    freshness_block: dict[str, Any] | None = None
+    if freshness_verdict is not None:
+        degraded_sources = bool(freshness_verdict.get("degraded"))
+        freshness_block = {
+            "degraded": degraded_sources,
+            "stale_sources": list(freshness_verdict.get("stale_sources") or []),
+            "reason": freshness_verdict.get("reason"),
+            "checked_at": freshness_verdict.get("checked_at"),
+        }
+        if degraded_sources:
+            freshness_block["banner"] = (
+                "tryb konserwatywny: źródła nieaktualne — niewiadome na regułach "
+                "twardych raportowane jako potencjalne blokery (F-0443/0445)"
+            )
     # Seed the critique's "improved vs previous iteration" comparison from the last
     # masterplan audit entry OF THIS ANALYSIS — each propose_layout call builds a
     # fresh loop, so the cross-call session continuity lives in the chronological
@@ -1648,6 +2054,8 @@ def _propose_masterplan_render(
         # Phase 12 §10.1.6: bound analyses contribute their BDOT10k neighbors so
         # §13/§60 see neighbor shadows (the validators' existing `neighbors` API).
         neighbors=tuple(site_context.neighbors) if site_context is not None else (),
+        # Review M2: the freshness-derived mode reaches run_inter_building_checks.
+        evaluation_mode=evaluation_mode,
     )
     result = loop.iterate_masterplan(proposal, rationale=rationale)
     metrics = result.metrics
@@ -1756,6 +2164,11 @@ def _propose_masterplan_render(
         "metrics": metrics.to_dict(),
         "unknowns": unknowns_json,
         "analysis_id": aid,
+        # Review M2 (F-0443/0445): the mode the inter-building checks actually
+        # ran under + the bound analysis' freshness verdict (banner when the
+        # sources behind the analysis are stale) — the model SEES the basis.
+        "evaluation_mode": evaluation_mode,
+        "freshness": freshness_block,
         # Phase 12 delta 1: site-context checks (earthworks / flood stages /
         # heritage interventions / zjazd) — None when no site context is bound.
         "site_checks": site_checks,

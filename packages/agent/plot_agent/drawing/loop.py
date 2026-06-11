@@ -190,6 +190,12 @@ class DrawingLoop:
     # BDOT10k site context) — forwarded into run_inter_building_checks so §13
     # przesłanianie / §60 nasłonecznienie account for neighbor shadows.
     neighbors: Sequence[Any] = ()
+    # Review M2 (F-0443/0445): rule-evaluation mode for the inter-building
+    # checks. Defaults to the validators' conservative mode; the analysis-bound
+    # MCP path passes the mode derived from the analysis' stored source-
+    # freshness verdict (stale sources FORCE "conservative" — the verdict
+    # never relaxes this default).
+    evaluation_mode: Any = "conservative"
     _counter: int = field(default=0, repr=False)
     _pum_target_cache: float | None = field(default=None, repr=False)
     _pum_target_computed: bool = field(default=False, repr=False)
@@ -391,6 +397,7 @@ class DrawingLoop:
             srodmiejska=proposal.zabudowa_srodmiejska,
             overrides=self.override_store,
             analysis_id=self.analysis_id,
+            mode=self.evaluation_mode,  # M2: freshness-derived mode (F-0443/0445)
             metrics=metrics,
             indicators=indicator_map,
         )
