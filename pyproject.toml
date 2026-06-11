@@ -127,6 +127,8 @@ module = [
     # Phase 10 sun engine (wt_validators §60) — pvlib/pandas ship no stubs here.
     "pvlib.*",
     "pandas.*",
+    # Phase 11 composition axes (plot_planning.brief) — no py.typed marker upstream.
+    "py_straight_skeleton.*",
 ]
 ignore_missing_imports = true
 

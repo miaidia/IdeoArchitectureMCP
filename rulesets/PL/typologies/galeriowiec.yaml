@@ -1,0 +1,39 @@
+# Typologia projektowa (Phase 11 §11.1.2) — SUGESTIA, nigdy walidator (plan §11.4).
+id: PL-TYP-GALERIOWIEC-001
+title: Galeriowiec — dostęp galeriowy przy płytkim trakcie
+jurisdiction: PL
+valid_from: 2026-01-01
+valid_to: null
+source_reference: >-
+  rulesets/PL/typologies/sources.md — design_practice (zasady projektowe, bez
+  mocy prawnej)
+basis: design_practice
+legal_force: none
+severity: soft
+inputs:
+  - shape_class
+  - width_m
+outputs:
+  - typology_recommendation
+summary: >-
+  Budynek z zewnętrzną galerią komunikacyjną i płytkim traktem 8-12 m;
+  wszystkie mieszkania jednostronnie lub dwustronnie doświetlone, galeria od
+  strony hałasu (kolej/ulica) działa jak bufor akustyczny.
+applicability:
+  when: {}
+parameters:
+  trakt_depth_m: {min: 8, max: 12}
+  typical_floors: {min: 3, max: 6}
+  gallery_width_m: {min: 1.5, max: 2.0}
+pros:
+  - "płytki trakt mieści się na bardzo wąskich pasach działki"
+  - "galeria od strony hałasu = sypialnie po cichej stronie"
+cons:
+  - "galeria przed oknami obniża prywatność mieszkań"
+  - "mniejsza efektywność PUM (komunikacja zewnętrzna liczona do PC)"
+preference:
+  base: 0.3
+  bonuses:
+    - when: {shape_class: narrow}
+      add: 0.15
+      why: "bardzo wąska działka: tylko płytki trakt galeriowca się mieści"

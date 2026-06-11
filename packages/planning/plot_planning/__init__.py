@@ -19,7 +19,16 @@ Public surface:
   (:func:`building_metrics` / :func:`masterplan_metrics` /
   :func:`generate_capacity_scenarios`, §8.5 F-0180–0215): estimation factors live in
   :class:`CapacityConfig` (basis ``industry_heuristic``); legal values (WT §39/§40) are
-  read from the ruleset registry via :mod:`plot_rules`.
+  read from the ruleset registry via :mod:`plot_rules`;
+* :mod:`plot_planning.brief` — the Phase 11 design-brief generator
+  (:func:`generate_design_brief` / :func:`composition_axes` — straight skeleton with
+  medial-axis fallback) + :data:`DEFAULT_BRIEF_STORE` backing the
+  ``analysis://{id}/design-brief`` resource;
+* :mod:`plot_planning.typologies` — design-practice typology SUGGESTIONS
+  (:func:`recommend_typologies`; never validators — plan §11.4);
+* :mod:`plot_planning.staging` — Phase 11 etapowanie consistency checks
+  (:func:`check_staging`; always soft; the WT §40 trigger comes from the rules
+  engine, never a literal).
 
 Decoupling (§9.4): no imports of ``plot_connectors`` (fetching is orchestrated
 above this layer) and no legal threshold values in code (rulesets only).
@@ -27,6 +36,15 @@ above this layer) and no legal threshold values in code (rulesets only).
 
 from __future__ import annotations
 
+from plot_planning.brief import (
+    DEFAULT_BRIEF_STORE,
+    BriefConfig,
+    DesignBrief,
+    DesignBriefStore,
+    analyze_frontages,
+    composition_axes,
+    generate_design_brief,
+)
 from plot_planning.capacity import (
     BuildingMetrics,
     CapacityConfig,
@@ -61,37 +79,50 @@ from plot_planning.parser import (
     validate_candidates,
 )
 from plot_planning.stability import stability_score
+from plot_planning.staging import StageCheck, check_staging
 from plot_planning.store import DEFAULT_PLANNING_STORE, PlanningStore
+from plot_planning.typologies import TypologyRecommendation, recommend_typologies
 from plot_planning.use_matrix import USE_CATEGORIES, use_matrix_for
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
+    "DEFAULT_BRIEF_STORE",
     "DEFAULT_PLANNING_STORE",
     "INDICATOR_NAMES",
     "MANUAL_REVIEW_REQUIRED",
     "PLANNING_INDICATORS_SCHEMA",
     "UNKNOWN_ACT_ID",
     "USE_CATEGORIES",
+    "BriefConfig",
     "BuildingMetrics",
     "CapacityConfig",
     "CapacityScenarioSet",
     "Conflict",
+    "DesignBrief",
+    "DesignBriefStore",
     "GmlParseError",
     "IndicatorExtraction",
     "IndicatorValue",
     "MasterplanMetrics",
     "ParsedPlanning",
     "PlanningStore",
+    "StageCheck",
+    "TypologyRecommendation",
     "ZoneCoverage",
+    "analyze_frontages",
     "building_metrics",
+    "check_staging",
+    "composition_axes",
     "detect_conflicts",
     "extract_indicators",
     "generate_capacity_scenarios",
+    "generate_design_brief",
     "masterplan_metrics",
     "indicators_from_zone",
     "missing_indicators",
     "parse_app_gml",
+    "recommend_typologies",
     "screen_document",
     "stability_score",
     "use_matrix_for",

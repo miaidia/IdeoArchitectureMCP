@@ -11,8 +11,14 @@ rules — never trusted free-form output (§20.11, NFR-SEC-003):
 * :mod:`plot_agent.drawing.loop`      — :class:`DrawingLoop` (propose→render→score→critique→learn).
 """
 
-from plot_agent.drawing.critique import StructuredCritique, critique
-from plot_agent.drawing.loop import DrawingLoop, IterationResult
+from plot_agent.drawing.critique import StructuredCritique, critique, critique_masterplan
+from plot_agent.drawing.exemplars import (
+    DensityBands,
+    ExemplarStoreV2,
+    density_class_for,
+    format_exemplars_for_prompt,
+)
+from plot_agent.drawing.loop import AuditEntry, DrawingLoop, IterationResult
 from plot_agent.drawing.memory import DrawingExemplarStore, Exemplar
 from plot_agent.drawing.proposal import (
     BuildingSegment,
@@ -22,12 +28,18 @@ from plot_agent.drawing.proposal import (
     ParkingElement,
     PlacedRectangle,
     RoadElement,
+    masterplan_program_type,
     parse_proposal,
     shape_class_for,
 )
 from plot_agent.drawing.score import ProposalScore, score_masterplan, score_proposal
 from plot_agent.drawing.validate import Violation, validate_hard, validate_hard_masterplan
-from plot_agent.drawing.variants import DEFAULT_VARIANT_STORE, MasterplanVariantStore
+from plot_agent.drawing.variants import (
+    DEFAULT_MASTERPLAN_AUDIT,
+    DEFAULT_VARIANT_STORE,
+    MasterplanAuditLog,
+    MasterplanVariantStore,
+)
 
 __all__ = [
     "BuildingSegment",
@@ -37,6 +49,7 @@ __all__ = [
     "ParkingElement",
     "PlacedRectangle",
     "RoadElement",
+    "masterplan_program_type",
     "parse_proposal",
     "shape_class_for",
     "Violation",
@@ -47,10 +60,18 @@ __all__ = [
     "score_proposal",
     "StructuredCritique",
     "critique",
+    "critique_masterplan",
     "DrawingExemplarStore",
+    "DensityBands",
     "Exemplar",
+    "ExemplarStoreV2",
+    "density_class_for",
+    "format_exemplars_for_prompt",
+    "AuditEntry",
     "DrawingLoop",
     "IterationResult",
+    "DEFAULT_MASTERPLAN_AUDIT",
     "DEFAULT_VARIANT_STORE",
+    "MasterplanAuditLog",
     "MasterplanVariantStore",
 ]

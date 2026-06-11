@@ -22,11 +22,21 @@ dependencies = [
     # from the ruleset registry via the plot_rules engine — never hardcoded here.
     "plot-rules",
     "pvlib>=0.15.1",
+    # Phase 11 composition axes (design brief): straight skeleton of the parcel
+    # polygon. License verified on install: BSD 3-Clause (dist-info/LICENSE,
+    # "Copyright (c) 2024, ICON") — NOT AGPL (§0v2.3 guard); its only dependency is
+    # matplotlib, already in the workspace via plot-reports.
+    "py-straight-skeleton>=0.1.0",
+    # Phase 11 design brief: REUSE the Phase 5 geometry metrics (main axis, width
+    # profile, frontage azimuth, shape metrics) — a downward dep (plot_geo depends
+    # only on plot_domain/plot_shared), so the §9.4 decoupling rules stay intact.
+    "plot-geo",
 ]
 
 [tool.uv.sources]
 plot-domain = { workspace = true }
 plot-rules = { workspace = true }
+plot-geo = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

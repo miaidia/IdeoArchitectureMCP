@@ -1,0 +1,48 @@
+# Typologia projektowa (Phase 11 §11.1.2) — SUGESTIA, nigdy walidator (plan §11.4).
+id: PL-TYP-KWARTAL-OBRZEZNY-001
+title: Kwartał obrzeżny — zabudowa obwodowa z dziedzińcem
+jurisdiction: PL
+valid_from: 2026-01-01
+valid_to: null
+source_reference: >-
+  rulesets/PL/typologies/sources.md — design_practice (zasady projektowe, bez
+  mocy prawnej)
+basis: design_practice
+legal_force: none
+severity: soft
+inputs:
+  - shape_class
+  - width_m
+  - srodmiejska
+  - uslugi_expected
+outputs:
+  - typology_recommendation
+summary: >-
+  Obwodowa zabudowa pierzejowa domykająca kwartał z zielonym dziedzińcem
+  wewnętrznym (plac zabaw, rekreacja); skrzydła o trakcie 12-18 m, bok
+  kwartału 60-120 m, dziedziniec min. ok. 30 m w świetle dla doświetlenia.
+applicability:
+  when:
+    shape_class: [square, rectangular, corner]
+    width_m: {min: 60}
+parameters:
+  block_side_m: {min: 60, max: 120}
+  courtyard_clear_width_m: {min: 30}
+  trakt_depth_m: {min: 12, max: 18}
+  typical_floors: {min: 4, max: 8}
+pros:
+  - "najwyższa intensywność przy zachowaniu cichego, zielonego dziedzińca"
+  - "pierzeja izoluje dziedziniec od hałasu ulicy/kolei"
+  - "dziedziniec naturalnie mieści plac zabaw i PBC nad halą garażową"
+cons:
+  - "narożniki kwartału wymagają starannego doświetlenia (mieszkania narożne)"
+  - "wymaga szerokiej działki — bok kwartału z dziedzińcem to min. ok. 60 m"
+preference:
+  base: 0.4
+  bonuses:
+    - when: {srodmiejska: true}
+      add: 0.25
+      why: "zabudowa śródmiejska: pierzeja kwartału kontynuuje miejski front ulicy"
+    - when: {uslugi_expected: true}
+      add: 0.2
+      why: "usługowy parter domyka pierzeję publiczną kwartału"

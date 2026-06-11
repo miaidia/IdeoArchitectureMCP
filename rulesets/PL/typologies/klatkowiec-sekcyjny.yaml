@@ -1,0 +1,41 @@
+# Typologia projektowa (Phase 11 §11.1.2) — SUGESTIA, nigdy walidator (plan §11.4).
+id: PL-TYP-KLATKOWIEC-SEKCYJNY-001
+title: Klatkowiec sekcyjny — liniowy budynek z powtarzalnych sekcji
+jurisdiction: PL
+valid_from: 2026-01-01
+valid_to: null
+source_reference: >-
+  rulesets/PL/typologies/sources.md — design_practice (zasady projektowe, bez
+  mocy prawnej)
+basis: design_practice
+legal_force: none
+severity: soft
+inputs:
+  - shape_class
+  - width_m
+outputs:
+  - typology_recommendation
+summary: >-
+  Liniowy budynek złożony z powtarzalnych sekcji klatkowych (sekcja 20-35 m,
+  trakt 12-18 m, 2-4 mieszkania na klatkę i kondygnację); ustawiany wzdłuż osi
+  kompozycyjnej działki, ekonomiczny w realizacji etapami (sekcja = etap).
+applicability:
+  when:
+    shape_class: [narrow, rectangular, square, corner]
+parameters:
+  section_length_m: {min: 20, max: 35}
+  trakt_depth_m: {min: 12, max: 18}
+  mieszkania_na_klatke_na_kondygnacje: {min: 2, max: 4}
+  typical_floors: {min: 3, max: 8}
+pros:
+  - "powtarzalna sekcja obniża koszt projektowania i budowy"
+  - "naturalne etapowanie: każda sekcja jest samodzielnie zamieszkiwalna"
+cons:
+  - "długie pierzeje wymagają kontroli przesłaniania (§13) wobec sąsiadów"
+  - "monotonia elewacji przy zbyt wielu identycznych sekcjach"
+preference:
+  base: 0.5
+  bonuses:
+    - when: {width_m: {max: 45}}
+      add: 0.15
+      why: "ograniczona szerokość działki: sekcje układają się wzdłuż osi głównej"

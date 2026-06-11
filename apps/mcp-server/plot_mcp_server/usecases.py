@@ -52,7 +52,7 @@ from plot_domain.enums import (
 # Marker version so reload is observable in tests/diagnostics even when ruleset
 # content is unchanged. Bump-by-reload is verified via the registry hash, but this
 # string also lets a test confirm the module object was re-imported.
-USECASES_BUILD = "phase9-masterplan"
+USECASES_BUILD = "phase11b-architect-loop"
 
 PHASE7_NOTE = "Stub: analysis logic lands in Phase 7; MCP delegates to the worker in Phase 12."
 
@@ -559,6 +559,69 @@ def constraints_compute(analysis_id: str | None) -> dict[str, Any]:
     }
 
 
+def design_brief_for_analysis(
+    analysis_id: str,
+    *,
+    ruleset_dir: str | None = None,
+    context_edges: list[dict[str, Any]] | None = None,
+    heritage_footprints: list[dict[str, Any]] | None = None,
+    refresh: bool = False,
+) -> dict[str, Any]:
+    """Build (or return the cached) design brief for a stored analysis (Phase 11 §11.1.1).
+
+    Backs the ``analysis://{analysis_id}/design-brief`` resource: the brief is
+    generated lazily from the stored :class:`AnalysisResult` (parcel geometry +
+    buildable envelope + planning indicators), kept in
+    :data:`plot_planning.DEFAULT_BRIEF_STORE` (variants-store pattern) and returned as
+    BOTH the structured model dump (structuredContent) and the rendered Markdown
+    (what the model reads). ``refresh=True`` regenerates (e.g. after hot-reloading a
+    typology YAML — the registry is loaded fresh per call either way). Explicitly
+    provided ``context_edges``/``heritage_footprints`` imply a refresh too (review
+    fix F3): a cached bare brief must never silently swallow new arguments.
+    """
+    from plot_planning import DEFAULT_BRIEF_STORE, generate_design_brief
+    from plot_rules import load_rulesets
+    from shapely.geometry import shape
+
+    explicit_inputs = context_edges is not None or heritage_footprints is not None
+    cached = DEFAULT_BRIEF_STORE.get(analysis_id)
+    if cached is not None and not refresh and not explicit_inputs:
+        return {
+            "status": "ok",
+            "analysis_id": analysis_id,
+            "brief": cached.model_dump(mode="json"),
+            "markdown": cached.to_markdown(),
+        }
+
+    result = DEFAULT_STORE.get(analysis_id)
+    if result is None or result.parcel is None or result.parcel.geometry is None:
+        return {
+            "status": "not_found",
+            "analysis_id": analysis_id,
+            "note": "Brak zapisanej analizy z geometrią działki — uruchom parcel_analyze.",
+        }
+
+    indicators = _indicator_map(result.planning.get("indicators"))
+    srodmiejska = bool(indicators.get("zabudowa_srodmiejska") is True)
+    brief = generate_design_brief(
+        shape(result.parcel.geometry),
+        registry=load_rulesets(ruleset_dir or "rulesets/PL"),
+        envelope=result.buildable_envelope,
+        indicators=indicators,
+        heritage_footprints=heritage_footprints or [],
+        context_edges=context_edges or [],
+        srodmiejska=srodmiejska,
+        analysis_id=analysis_id,
+    )
+    DEFAULT_BRIEF_STORE.put(analysis_id, brief)
+    return {
+        "status": "ok",
+        "analysis_id": analysis_id,
+        "brief": brief.model_dump(mode="json"),
+        "markdown": brief.to_markdown(),
+    }
+
+
 def _indicator_map(
     indicators: dict[str, Any] | list[dict[str, Any]] | None,
 ) -> dict[str, Any]:
@@ -679,7 +742,9 @@ def sources_collect(analysis_id: str | None) -> dict[str, Any]:
     }
 
 
-def report_generate(analysis_id: str | None, fmt: str) -> dict[str, Any]:
+def report_generate(
+    analysis_id: str | None, fmt: str, variant_id: str | None = None
+) -> dict[str, Any]:
     """Generate a report artifact for a stored analysis (Phase 7 §E; §22 template).
 
     * ``md``  → the §22 Markdown report (returned inline as ``content`` — it is small text).
@@ -687,11 +752,18 @@ def report_generate(analysis_id: str | None, fmt: str) -> dict[str, Any]:
     * ``png`` → the buildable-envelope map rendered + persisted, advertised as a
       ``resource_link`` by DEFAULT (image NOT inlined into every result — NFR-PERF-009;
       inline image is only via the dedicated ``map_preview`` tool).
+    * ``koncepcja`` (Phase 11 §11.1.7) → the multi-building chłonność concept
+      deliverable assembled from the variant store + capacity metrics + design
+      brief + rule/staging checks + the design-rationale audit; ``variant_id``
+      selects the masterplan variant (default: the latest stored one).
 
     The MD and JSON share one result object, so their headline numbers match by
     construction (§7.3). HTML/PDF/audience variants are Phase 12.
     """
     result = DEFAULT_STORE.get(analysis_id) if analysis_id else None
+
+    if fmt == "koncepcja":
+        return _report_koncepcja(analysis_id, variant_id)
 
     if fmt in ("md", "markdown"):
         from plot_reports import headline_numbers, render_markdown
@@ -749,6 +821,139 @@ def report_generate(analysis_id: str | None, fmt: str) -> dict[str, Any]:
         "artifact_uri": None,
         "status": "not_yet_computed",
         "note": "HTML/PDF/audience variants land in Phase 12 (§31).",
+    }
+
+
+def _variant_lineage_entries(variant: Any) -> list[dict[str, Any]]:
+    """Audit entries that produced ``variant`` — its variant-id parent chain (F1).
+
+    Lineage key (review fix F1, documented choice): every masterplan audit entry
+    is stamped with ``analysis_id`` + ``variant_id`` + ``parent_variant_id`` (the
+    variant of the previous iteration in the SAME analysis — the entry whose score
+    components seeded the critique). The koncepcja report walks that chain from the
+    reported variant backwards and renders ONLY those entries' rationales, in
+    chronological order. Every MCP masterplan iteration stores a variant, so the
+    chain has no gaps; entries from other analyses/sessions can never appear.
+    Today all propose_layout calls share :data:`ADHOC_ANALYSIS_ID` — distinct
+    analyses are already isolated, and real per-analysis ids arrive in Phase 12.
+    """
+    from plot_agent.drawing import DEFAULT_MASTERPLAN_AUDIT
+
+    by_variant: dict[str, dict[str, Any]] = {}
+    for entry in DEFAULT_MASTERPLAN_AUDIT.entries(analysis_id=variant.analysis_id):
+        vid = entry.get("variant_id")
+        if isinstance(vid, str) and vid:
+            by_variant[vid] = entry
+    chain: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    cursor: Any = variant.id
+    while isinstance(cursor, str) and cursor and cursor not in seen:
+        seen.add(cursor)
+        link = by_variant.get(cursor)
+        if link is None:
+            break  # audit cleared / pre-fix entry without lineage: stop honestly
+        chain.append(link)
+        cursor = link.get("parent_variant_id")
+    chain.reverse()  # oldest iteration first (chronological "dlaczego tak")
+    return chain
+
+
+def _report_koncepcja(
+    analysis_id: str | None, variant_id: str | None = None
+) -> dict[str, Any]:
+    """Assemble the koncepcja deliverable (Phase 11 §11.1.7) — no recomputation.
+
+    Sources (all already computed and stored by earlier tool calls):
+
+    * masterplan variant (:data:`plot_agent.drawing.DEFAULT_VARIANT_STORE`) —
+      buildings, stage table, totals, WT/ppoż + staging checks, unknowns, critique;
+    * design brief (:data:`plot_planning.DEFAULT_BRIEF_STORE` via the cached
+      ``design_brief_for_analysis``);
+    * design rationale — the reported variant's LINEAGE of masterplan audit
+      entries (:data:`plot_agent.drawing.DEFAULT_MASTERPLAN_AUDIT` filtered by
+      the variant-id parent chain, see :func:`_variant_lineage_entries` — plan
+      §11.1.6 + review fix F1: never another session's rationales).
+
+    The plan render (renderer v2 WITH the stage-table panel) uses the same parcel
+    geometry the variant was scored against (the drawing context — propose_layout
+    is adhoc-bound until Phase 12, documented there). The Markdown is returned
+    inline (small text, like ``md``) and also served by the variant-scoped
+    ``analysis://{analysis_id}/masterplan/{variant_id}/report.md`` resource —
+    the variant-scoped resource was chosen over reusing ``analysis://{id}/report.md``
+    because a koncepcja is per-VARIANT (several iterations may be stored per
+    analysis), mirroring the existing ``metrics.json`` resource pattern.
+    """
+    from plot_agent.drawing import DEFAULT_VARIANT_STORE
+    from plot_planning import DEFAULT_BRIEF_STORE
+    from plot_reports import get_artifact_store, render_koncepcja_markdown, render_masterplan
+
+    aid = analysis_id or ADHOC_ANALYSIS_ID
+    # Variant resolution (F1): an explicit variant_id is honoured as-is (the E2E
+    # session reports an adhoc-bound variant under its real analysis id — Phase 12
+    # binds propose_layout to the analysis); WITHOUT one, "latest" may only pick a
+    # variant of THIS analysis — never another session's most recent variant.
+    variant = (
+        DEFAULT_VARIANT_STORE.get(variant_id)
+        if variant_id
+        else DEFAULT_VARIANT_STORE.latest(analysis_id=aid)
+    )
+    if variant is None:
+        return {
+            "analysis_id": analysis_id,
+            "format": "koncepcja",
+            "variant_id": variant_id,
+            "status": "not_found",
+            "note": (
+                "Brak zapisanego wariantu masterplanu — najpierw zaproponuj koncepcję "
+                "przez propose_layout (DSL v2, klucz 'buildings')."
+            ),
+        }
+
+    brief = DEFAULT_BRIEF_STORE.get(aid) if aid else None
+    brief_dump = brief.model_dump(mode="json") if brief is not None else None
+    metadata = variant.metadata if isinstance(variant.metadata, dict) else {}
+
+    # Plan render with the per-stage table panel (renderer v2, Phase 9 §9.1.4).
+    context = _drawing_context()
+    render = render_masterplan(
+        variant,
+        context.parcel_geom(),
+        metrics={"stage_table": variant.stage_table},
+        envelope=context.envelope_geom(),
+        title=f"Plan zagospodarowania terenu (koncepcja) — {aid}",
+    )
+    store = get_artifact_store()
+    png_key = f"analysis/{aid}/koncepcja-{variant.id.replace(':', '-')}.png"
+    png_uri = store.put_render(png_key, render)
+    report_resource = f"analysis://{aid}/masterplan/{variant.id}/report.md"
+
+    content = render_koncepcja_markdown(
+        analysis_id=aid,
+        variant=variant,
+        generated_at=_now().isoformat(),
+        brief=brief_dump,
+        rationales=_variant_lineage_entries(variant),
+        unknowns=list(metadata.get("unknowns") or []),
+        capacity=(metadata.get("critique") or {}).get("capacity"),
+        plan_png_resource=png_uri,
+    )
+    md_key = f"analysis/{aid}/koncepcja-{variant.id.replace(':', '-')}.md"
+    md_uri = store.put(md_key, content.encode("utf-8"), "text/markdown")
+    return {
+        "analysis_id": aid,
+        "format": "koncepcja",
+        "variant_id": variant.id,
+        "content": content,
+        "artifact_uri": md_uri,
+        "plan_png_uri": png_uri,
+        "plan_png_bytes": len(render.data),
+        "resource_link": report_resource,
+        "status": "rendered",
+        "note": (
+            "Koncepcja zestawiona z zapisanych danych (wariant + brief + audyt "
+            "uzasadnień) — bez ponownych obliczeń; rysunek planu z panelem tabeli "
+            "etapów zapisany w ArtifactStore."
+        ),
     }
 
 
@@ -1034,12 +1239,27 @@ def _connector_health_stub() -> list[dict[str, Any]]:
 # SEES its drawing (reuses the Phase 3 image path). Geometry is the Phase 3 sample
 # parcel/envelope/constraints until Phase 7 supplies real analysis geometry.
 # --------------------------------------------------------------------------- #
+# Injectable drawing context for propose_layout/report koncepcja (same idiom as
+# set_connectors): production stays on the Phase 3 sample geometry until
+# propose_layout becomes analysis-bound (Phase 12); tests inject the golden-parcel
+# AnalysisContext so the scripted architect session runs on real fixture geometry.
+_DRAWING_CONTEXT: Any | None = None
+
+
+def set_drawing_context(context: Any | None) -> None:
+    """Override the AnalysisContext used by the drawing paths (tests inject fixtures)."""
+    global _DRAWING_CONTEXT
+    _DRAWING_CONTEXT = context
+
+
 def _drawing_context(ruleset_dir: str | None = None) -> Any:
     """Build an AnalysisContext from the Phase 3 sample geometry + loaded rules (§4.1.C)."""
     from plot_agent import AnalysisContext
     from plot_reports.preview import sample_preview_layers
     from plot_reports.render import LayerRole
 
+    if _DRAWING_CONTEXT is not None:
+        return _DRAWING_CONTEXT
     layers = sample_preview_layers()
     by_role: dict[Any, list[Any]] = {}
     for layer in layers:
@@ -1060,6 +1280,7 @@ def _drawing_context(ruleset_dir: str | None = None) -> Any:
 def propose_layout_render(
     proposal_payload: dict[str, Any],
     indicators: dict[str, Any] | list[dict[str, Any]] | None = None,
+    rationale: str | None = None,
 ) -> dict[str, Any]:
     """Validate + render + score + critique a typed proposal (§4.1.C / §4.4; Phase 9).
 
@@ -1071,9 +1292,13 @@ def propose_layout_render(
     ``metrics``/``unknowns``/``variant_id``). The proposal is parsed by Pydantic (typed
     DATA, never trusted free-form — NFR-SEC-003); a hard-violating proposal returns
     ``accepted=False`` regardless of its score (§14.2).
+
+    ``rationale`` (Phase 11 §11.1.6) is the model's free-text design reasoning for
+    this iteration: it is persisted in the audit record and surfaced in the
+    deliverable ONLY — validators/scoring/critique never receive it (NFR-SEC-003).
     """
     if "buildings" in proposal_payload or proposal_payload.get("schema_version") == 2:
-        return _propose_masterplan_render(proposal_payload, indicators)
+        return _propose_masterplan_render(proposal_payload, indicators, rationale)
 
     from plot_agent.drawing import DrawingLoop, LayoutProposal
 
@@ -1081,7 +1306,7 @@ def propose_layout_render(
     # Parse/validate the proposal — malformed/out-of-range input fails here (typed guard).
     proposal = LayoutProposal.model_validate(proposal_payload)
     loop = DrawingLoop(context=context)
-    result = loop.iterate(proposal)
+    result = loop.iterate(proposal, rationale=rationale)
     return {
         "png_bytes": result.render_image_bytes,
         "mime_type": result.render_mime,
@@ -1091,6 +1316,7 @@ def propose_layout_render(
         "critique": result.critique.to_dict(),
         "violations": [v.to_dict() for v in result.score.violations],
         "artifact_uri": result.artifact_uri,
+        "rationale": result.rationale,
         # Audit entry (F-0446) recorded inside the loop; surface its summary here.
         "audit": loop.audit_log[-1].to_dict() if loop.audit_log else None,
         "note": "Footprint validated against hard constraints BEFORE scoring (§14.2).",
@@ -1100,35 +1326,33 @@ def propose_layout_render(
 def _propose_masterplan_render(
     proposal_payload: dict[str, Any],
     indicators: dict[str, Any] | list[dict[str, Any]] | None = None,
+    rationale: str | None = None,
 ) -> dict[str, Any]:
-    """Masterplan path of ``propose_layout`` (Phase 9 §9.1 + Phase 10 §10.1.7):
-    ingest-validate → capacity metrics → inter-building WT/ppoż validators →
-    renderer v2 (violation overlay) → score (hard-blocker dominance) → variant store.
+    """Masterplan path of ``propose_layout`` (Phase 9 §9.1 + Phase 10 §10.1.7 +
+    Phase 11 §11.1.3): one iteration of the generative masterplan loop v2.
 
-    The Phase 10 validators (:func:`plot_planning.wt_validators
-    .run_inter_building_checks`) evaluate WT §12/§13/§19/§39/§40/§60 + ppoż over the
-    proposal against the loaded ruleset registry; FAILING hard checks become hard
-    violations in :func:`score_masterplan` (§14.2 dominance) and their
-    ``geometry_evidence`` is rendered as the red top-z-order violation overlay.
-    Audited expert overrides from :data:`plot_rules.DEFAULT_OVERRIDE_STORE` are
-    consumed under the ``"adhoc"`` analysis id (propose_layout is not yet
-    analysis-bound — Phase 12). Variant metrics are stored in
-    :data:`plot_agent.drawing.DEFAULT_VARIANT_STORE` and served by the
-    ``analysis://{analysis_id}/masterplan/{variant_id}/metrics.json`` resource (and
-    embedded in the tool result for convenience).
+    The :class:`plot_agent.drawing.DrawingLoop` runs the full pipeline —
+    ingest-validate → capacity metrics → inter-building WT/ppoż validators →
+    staging checks → score (hard-blocker dominance §14.2) → STRUCTURED critique
+    (rule ids + subjects + capacity gap vs the base-scenario target) → renderer v2
+    (violation overlay) → exemplar learn → audit (F-0446 with inputs hash +
+    rationale). Audited expert overrides from
+    :data:`plot_rules.DEFAULT_OVERRIDE_STORE` are consumed under the ``"adhoc"``
+    analysis id (propose_layout is not yet analysis-bound — Phase 12). Variant
+    metrics are stored in :data:`plot_agent.drawing.DEFAULT_VARIANT_STORE` and
+    served by the ``analysis://{analysis_id}/masterplan/{variant_id}/metrics.json``
+    resource; the audit entry (with the model's ``rationale``) is appended to
+    :data:`plot_agent.drawing.DEFAULT_MASTERPLAN_AUDIT` for the koncepcja report.
     """
     from plot_agent.drawing import (
+        DEFAULT_MASTERPLAN_AUDIT,
         DEFAULT_VARIANT_STORE,
+        DrawingLoop,
         MasterplanProposal,
-        critique,
-        score_masterplan,
     )
-    from plot_agent.drawing.loop import DEFAULT_ACCEPTANCE_THRESHOLD
     from plot_domain import BuildingRecord, MasterplanVariant
-    from plot_planning import CapacityConfig, masterplan_metrics
-    from plot_planning.wt_validators import run_inter_building_checks
-    from plot_reports import get_artifact_store, render_masterplan
-    from plot_rules import DEFAULT_OVERRIDE_STORE, RuleStatus
+    from plot_reports import RenderResult, get_artifact_store
+    from plot_rules import DEFAULT_OVERRIDE_STORE
     from shapely.geometry import mapping
 
     context = _drawing_context()
@@ -1136,48 +1360,50 @@ def _propose_masterplan_render(
     # the Pydantic validators; buildings-within-parcel is a SCORING-time violation.
     proposal = MasterplanProposal.model_validate(proposal_payload)
     indicator_map = _indicator_map(indicators)
-    metrics = masterplan_metrics(
-        proposal,
-        context.parcel_geom(),
-        indicator_map,
-        config=CapacityConfig(),
-        registry=context.ruleset,
+    # Seed the critique's "improved vs previous iteration" comparison from the last
+    # masterplan audit entry OF THIS ANALYSIS — each propose_layout call builds a
+    # fresh loop, so the cross-call session continuity lives in the chronological
+    # audit log; entries from other analyses/sessions are never consulted (F1).
+    # The seeding entry's variant id is also this iteration's lineage parent.
+    previous_entries = DEFAULT_MASTERPLAN_AUDIT.entries(analysis_id=ADHOC_ANALYSIS_ID)
+    previous_entry = previous_entries[-1] if previous_entries else None
+    previous_components = (
+        dict(previous_entry.get("components") or {}) if previous_entry else None
     )
-    # Phase 10: inter-building WT/ppoż validators (thresholds from the ruleset
-    # registry; Phase 9 metrics REUSED, not recomputed; overrides consumed audited).
-    checks = run_inter_building_checks(
-        proposal,
-        context.parcel_geom(),
-        context.ruleset,
-        srodmiejska=proposal.zabudowa_srodmiejska,
-        overrides=DEFAULT_OVERRIDE_STORE,
-        analysis_id=ADHOC_ANALYSIS_ID,
-        metrics=metrics,
+    parent_variant_id = previous_entry.get("variant_id") if previous_entry else None
+    loop = DrawingLoop(
+        context=context,
         indicators=indicator_map,
+        override_store=DEFAULT_OVERRIDE_STORE,
+        analysis_id=ADHOC_ANALYSIS_ID,
+        artifact_store=get_artifact_store(),  # same store as the variant artifact
+        previous_components=previous_components,
     )
-    checks_json = [c.model_dump(mode="json") for c in checks]
-    score = score_masterplan(proposal, context, metrics, inter_building_checks=checks)
-    crit = critique(proposal, score)
-    # Failing checks' geometry evidence → red top-z-order violation overlay (§10.1.7).
-    violation_geoms = [
-        c.geometry_evidence["geometry"]
-        for c in checks
-        if c.status is RuleStatus.FAIL
-        and c.geometry_evidence
-        and c.geometry_evidence.get("geometry")
-    ]
-    render = render_masterplan(
-        proposal,
-        context.parcel_geom(),
-        metrics=metrics,
-        envelope=context.envelope_geom(),
-        violations=violation_geoms or None,
-    )
+    result = loop.iterate_masterplan(proposal, rationale=rationale)
+    metrics = result.metrics
+    assert metrics is not None  # the masterplan path always computes metrics
+    checks_json = [c.model_dump(mode="json") for c in result.inter_building_checks]
+    staging_json = [c.model_dump(mode="json") for c in result.staging_checks]
+    score = result.score
+    crit = result.critique
 
     variant_id = f"mvar:{uuid.uuid4().hex[:8]}"
+    # Persist the render under the variant key too (the loop already audited its own
+    # iteration artifact) so the per-variant style sidecar stays addressable
+    # (NFR-AUD-009: <artifact>.style.json next to masterplan/<variant>.png).
+    render = RenderResult(
+        data=result.render_image_bytes,
+        mime_type=result.render_mime,
+        style_metadata=result.style_metadata or {},
+    )
     artifact_uri = get_artifact_store().put_render(f"masterplan/{variant_id}.png", render)
+    unknowns_json = [u.model_dump(mode="json") for u in metrics.unknowns]
     variant = MasterplanVariant(
         id=variant_id,
+        # Owning-analysis stamp (F1): today every propose_layout call is adhoc-bound
+        # (ADHOC_ANALYSIS_ID; real ids Phase 12) — the koncepcja report + latest()
+        # resolve variants per analysis, never across sessions.
+        analysis_id=ADHOC_ANALYSIS_ID,
         buildings=[
             BuildingRecord(
                 id=f"bld:{variant_id}:{i + 1}",
@@ -1208,27 +1434,34 @@ def _propose_masterplan_render(
             # Phase 10: the WT/ppoż rule outcomes travel with the stored variant
             # (served by the metrics.json resource — full trace + evidence).
             "inter_building_checks": checks_json,
+            # Phase 11: etapowanie consistency outcomes (always soft).
+            "staging_checks": staging_json,
+            # Phase 11 §11.1.7: unknowns + critique travel with the variant so the
+            # koncepcja report assembles without recomputation.
+            "unknowns": unknowns_json,
+            "critique": crit.to_dict(),
+            # Lineage pointer (F1): the previous iteration of the SAME analysis
+            # (the audit entry that seeded previous_components), None for the first.
+            "parent_variant_id": parent_variant_id,
         },
     )
     DEFAULT_VARIANT_STORE.put(variant)
 
-    accepted = bool(score.valid and score.total >= DEFAULT_ACCEPTANCE_THRESHOLD)
-    audit = {  # masterplan audit record (F-0446): inputs, score, artifact, timestamp
-        "timestamp": _now().isoformat(),
-        "schema_version": 2,
-        "variant_id": variant_id,
-        "buildings": len(proposal.buildings),
-        "inputs": proposal.model_dump(mode="json"),
-        "total": score.total,
-        "valid": score.valid,
-        "accepted": accepted,
-        "violations": [v.to_dict() for v in score.violations],
-        "inter_building_checks": checks_json,
-        "artifact_uri": artifact_uri,
-    }
+    accepted = result.accepted
+    # Masterplan audit record (F-0446 + Phase 11 §11.1.6): the loop's entry
+    # (inputs hash, scores, critique, rationale, iteration artifact) extended with
+    # the MCP-level variant pointer; appended to the chronological audit log the
+    # koncepcja report reads the design-rationale section from.
+    audit = dict(loop.audit_log[-1].to_dict())  # carries analysis_id (loop stamp)
+    audit["variant_id"] = variant_id
+    audit["parent_variant_id"] = parent_variant_id  # lineage chain (F1)
+    audit["buildings"] = len(proposal.buildings)
+    audit["inter_building_checks"] = checks_json
+    audit["variant_artifact_uri"] = artifact_uri
+    DEFAULT_MASTERPLAN_AUDIT.append(audit)
     return {
-        "png_bytes": render.data,
-        "mime_type": render.mime_type,
+        "png_bytes": result.render_image_bytes,
+        "mime_type": result.render_mime,
         "accepted": accepted,
         "valid": score.valid,
         "score": score.to_dict(),
@@ -1238,19 +1471,24 @@ def _propose_masterplan_render(
         "audit": audit,
         "schema_version": 2,
         "variant_id": variant_id,
+        "rationale": rationale,
+        "exemplar_id": result.exemplar.exemplar_id if result.exemplar else None,
         "metrics": metrics.to_dict(),
-        "unknowns": [u.model_dump(mode="json") for u in metrics.unknowns],
+        "unknowns": unknowns_json,
         "metrics_resource": f"analysis://{ADHOC_ANALYSIS_ID}/masterplan/{variant_id}/metrics.json",
         # Phase 10: full WT/ppoż rule outcomes (trace + geometry evidence) + the
         # render's style-metadata sidecar (the violation overlay layer is auditable
         # there too — NFR-AUD-009; persisted at <artifact>.style.json).
         "inter_building_checks": checks_json,
-        "style_metadata": render.style_metadata,
+        # Phase 11: etapowanie consistency (soft warnings, never hard violations).
+        "staging_checks": staging_json,
+        "style_metadata": result.style_metadata,
         "note": (
             "Masterplan DSL v2: walidacja twardych ograniczeń PRZED punktacją (§14.2); "
             "metryki chłonności z basis-metadanymi; walidatory między-budynkowe WT/ppoż "
             "(Phase 10) ocenione z progami z rulesetów — FAIL na regule twardej = hard "
-            "violation, geometria naruszeń w czerwonej warstwie overlay."
+            "violation, geometria naruszeń w czerwonej warstwie overlay; krytyka "
+            "strukturalna cytuje rule_id + podmiot + lukę chłonności (Phase 11)."
         ),
     }
 

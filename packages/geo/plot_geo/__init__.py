@@ -42,6 +42,7 @@ from .metrics import (
     narrowest_passage,
     nearest_boundary_distance,
     perimeter_m,
+    shape_class,
     usable_area,
     width_profile,
 )
@@ -120,6 +121,7 @@ __all__ = [
     "narrowest_passage",
     "nearest_boundary_distance",
     "perimeter_m",
+    "shape_class",
     "usable_area",
     "width_profile",
     # inscribed

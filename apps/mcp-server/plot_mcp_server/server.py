@@ -261,12 +261,30 @@ def sources_collect(
 @mcp.tool(annotations=_READ_ONLY, description="Generate report artifact in selected format.")
 def report_generate(
     analysis_id: Annotated[str | None, Field(description="Analysis run id.")] = None,
-    format: Annotated[str, Field(description="md | html | pdf | json.")] = "md",
+    format: Annotated[
+        str,
+        Field(
+            description=(
+                "md | html | pdf | json | png | koncepcja (Phase 11: multi-building "
+                "chłonność concept — plan render + per-building/per-stage PUM tables + "
+                "WT/ppoż compliance + design rationale + questions for the gmina)."
+            )
+        ),
+    ] = "md",
+    variant_id: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Masterplan variant id for format='koncepcja' (from propose_layout's "
+                "structuredContent.variant_id); default = the latest stored variant."
+            )
+        ),
+    ] = None,
     *,
     ctx: Context[ServerSession, AppContext],
 ) -> dict[str, Any]:
     # Large artifacts are returned as MCP resources, never inlined (NFR-PERF-009).
-    return _app(ctx).usecases.report_generate(analysis_id, format)
+    return _app(ctx).usecases.report_generate(analysis_id, format, variant_id)
 
 
 @mcp.tool(annotations=_READ_ONLY, description="Export GIS/CAD layers.")
@@ -475,10 +493,21 @@ def propose_layout(
             )
         ),
     ] = None,
+    rationale: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Phase 11 design-rationale record: the model's own reasoning for THIS "
+                "iteration ('dlaczego tak' — orientation, typology, staging choices). "
+                "Persisted in the audit trail and surfaced in the koncepcja report "
+                "ONLY; it is NEVER parsed by validators or scoring (NFR-SEC-003)."
+            )
+        ),
+    ] = None,
     *,
     ctx: Context[ServerSession, AppContext],
 ) -> CallToolResult:
-    out = _app(ctx).usecases.propose_layout_render(proposal, indicators)
+    out = _app(ctx).usecases.propose_layout_render(proposal, indicators, rationale)
     # Inline the rendered PNG as an image content block (Phase 0.2 image path).
     image = Image(data=out["png_bytes"], format="png").to_image_content()
     structured = {
@@ -502,6 +531,12 @@ def propose_layout(
         "unknowns",
         "metrics_resource",
         "inter_building_checks",
+        # Phase 11: etapowanie consistency outcomes (soft warnings — §11.1.5).
+        "staging_checks",
+        # Phase 11 §11.1.6: rationale echoed (audit-only input) + the exemplar id
+        # when the iteration was accepted into the persisted memory (§11.1.4).
+        "rationale",
+        "exemplar_id",
     ):
         if key in out:
             structured[key] = out[key]
@@ -702,6 +737,47 @@ def resource_masterplan_metrics(analysis_id: str, variant_id: str) -> str:
     )
 
 
+@mcp.resource(
+    "analysis://{analysis_id}/masterplan/{variant_id}/report.md",
+    mime_type="text/markdown",
+)
+def resource_masterplan_report(analysis_id: str, variant_id: str) -> str:
+    # Phase 11 §11.1.7: the koncepcja deliverable as a VARIANT-scoped resource
+    # (chosen over reusing analysis://{id}/report.md because a koncepcja is
+    # per-variant — several masterplan iterations may be stored per analysis;
+    # mirrors the metrics.json resource pattern). Assembled on demand by the
+    # same use-case the report_generate(format="koncepcja") tool path uses.
+    from plot_mcp_server.usecases import report_generate as _report_generate
+
+    out = _report_generate(analysis_id, "koncepcja", variant_id)
+    if out.get("status") != "rendered":
+        return (
+            f"# Koncepcja — {analysis_id}/{variant_id}\n\n"
+            f"_{out.get('note', 'Brak zapisanego wariantu masterplanu.')}_\n"
+        )
+    return str(out["content"])
+
+
+@mcp.resource("analysis://{analysis_id}/design-brief", mime_type="text/markdown")
+def resource_design_brief(analysis_id: str) -> str:
+    # Phase 11 (Target-workflow step 4): the model-readable design brief —
+    # composition axes (straight skeleton / medial axis), frontage & orientation
+    # analysis, heritage retention notes, buildable summary, MPZP indicators,
+    # hard rules in force (rule ids + YAML titles) and ranked typology SUGGESTIONS.
+    # Generated lazily from the stored analysis via the use-case helper and cached
+    # in plot_planning.DEFAULT_BRIEF_STORE (variants-store pattern); the structured
+    # Pydantic dump travels in the helper's return for structuredContent consumers.
+    from plot_mcp_server.usecases import design_brief_for_analysis
+
+    out = design_brief_for_analysis(analysis_id)
+    if out.get("status") != "ok":
+        return (
+            f"# Design brief — {analysis_id}\n\n"
+            f"_{out.get('note', 'Brak zapisanej analizy o tym id. Uruchom parcel_analyze.')}_\n"
+        )
+    return str(out["markdown"])
+
+
 @mcp.resource("analysis://{analysis_id}/report.md", mime_type="text/markdown")
 def resource_report_md(analysis_id: str) -> str:
     from plot_agent.analysis import DEFAULT_STORE
@@ -896,6 +972,81 @@ def explain_red_flags(analysis_id: str) -> str:
         f"Explain the red flags from analysis '{analysis_id}' to a non-technical investor: "
         "use risks_list and plain-language summaries with suggested next actions."
     )
+
+
+# --- Phase 11 §11.1.7 prompts: the architect workflow (Target-workflow steps 1–6) --- #
+@mcp.prompt(title="Analiza chłonności działki (koncepcja wielobudynkowa)")
+def analiza_chlonnosci_koncepcja(parcel: str) -> str:
+    # Encodes Target-workflow steps 1–6 (tools are frozen; prompts/resources carry
+    # the workflow). The model is the architect: it READS the brief, DECIDES the
+    # composition and records its rationale; the server only validates/critiques.
+    return (
+        f"Działasz jako architekt prowadzący analizę chłonności działki '{parcel}' "
+        "(koncepcja wielobudynkowa). Wykonaj kroki W TEJ KOLEJNOŚCI:\n"
+        "1. ANALIZA TERENU — parcel_resolve, potem parcel_analyze(analysis_mode="
+        "'quick_screening'); odczytaj ograniczenia i buildable envelope "
+        "(constraints_compute) oraz mapę (map_preview). Zanotuj analysis_id.\n"
+        "2. RAMA PLANISTYCZNA — planning_fetch; brakujące wskaźniki uzupełnij przez "
+        "planning_parse_document (tekst uchwały MPZP/WZ). Wskaźniki nieznane "
+        "POZOSTAJĄ nieznane — nigdy nie zgaduj wartości.\n"
+        "3. CHŁONNOŚĆ LICZBOWO (PRZED rysowaniem) — capacity_generate_scenarios"
+        "(analysis_id, indicators). Zapamiętaj PUM scenariusza BAZOWEGO jako cel.\n"
+        "4. DESIGN BRIEF — PRZECZYTAJ zasób analysis://{analysis_id}/design-brief: "
+        "osie kompozycyjne, pierzeje (hałas/cisza/ekspozycja południowa), zabytki do "
+        "zachowania, twarde reguły w mocy i SUGEROWANE typologie (sugestie, nie "
+        "przepisy). Sformułuj parti (zasadę kompozycji).\n"
+        "5. ITERACJE MASY — propose_layout z masterplanem DSL v2 (buildings/segments/"
+        "floors/uses, roads, parking, greenery, playgrounds, stages) + indicators "
+        "+ KAŻDORAZOWO własne 'rationale' (dlaczego ta orientacja/typologia/etapy). "
+        "Po każdej iteracji przeczytaj structuredContent.critique: usuń naruszenia "
+        "wskazane po rule_id i podmiocie (rule_findings), reaguj na lukę chłonności "
+        "(capacity) i ostrzeżenia etapowania (staging_warnings). Iteruj aż: ZERO "
+        "twardych naruszeń (valid=true, violations puste) ORAZ PUM w granicach ±10% "
+        "celu bazowego z kroku 3. Nigdy nie ukrywaj luki chłonności.\n"
+        "6. DELIVERABLE — report_generate(analysis_id, format='koncepcja', "
+        "variant_id=<wariant z ostatniej iteracji>): render planu + tabele PUM/PUU "
+        "per budynek i per etap + Twoje uzasadnienia projektowe + pytania do gminy."
+    )
+
+
+@mcp.prompt(title="Iteruj masterplan jak architekt")
+def iteruj_masterplan_jak_architekt(analysis_id: str) -> str:
+    # Single-iteration guidance: read the critique → explain the design moves in
+    # the rationale → adjust the typed DSL → resubmit. Optionally surfaces the
+    # persisted exemplar memory as few-shot (plan §11.1.4) when a brief exists.
+    from plot_agent.drawing import ExemplarStoreV2, format_exemplars_for_prompt
+    from plot_planning import DEFAULT_BRIEF_STORE
+
+    text = (
+        f"Wykonaj JEDNĄ iterację masterplanu dla analizy '{analysis_id}' jak "
+        "architekt:\n"
+        "1. Przeczytaj structuredContent.critique z poprzedniego propose_layout: "
+        "rule_findings (rule_id + podmiot: budynek / pair:A|B / parking:N + wartość "
+        "wymagana vs faktyczna), capacity (PUM vs cel scenariusza bazowego), "
+        "staging_warnings, improvements.\n"
+        "2. ZAPLANUJ ruchy projektowe odpowiadające na każde naruszenie po rule_id "
+        "(np. PL-WT-13 → rozsuń wskazaną parę budynków; PL-PPOZ-DROGA → poprowadź "
+        "drogę pożarową 5–15 m od dłuższego boku) i na lukę chłonności (np. dodaj "
+        "kondygnacje wzdłuż wolnej pierzei).\n"
+        "3. OPISZ te ruchy własnymi słowami w polu 'rationale' (dlaczego tak — to "
+        "trafia do audytu i raportu, nie do walidacji).\n"
+        "4. Zmodyfikuj typed DSL v2 (buildings/segments/floors/roads/parking/"
+        "greenery/playgrounds/stages) i wyślij ponownie propose_layout z tym samym "
+        "zestawem indicators + nowym rationale.\n"
+        "5. Sprawdź wynik: każde naruszenie musi zniknąć albo mieć świadome "
+        "uzasadnienie; nie akceptuj planu z twardym naruszeniem niezależnie od "
+        "score (§14.2)."
+    )
+    # Few-shot recall from the persisted exemplar memory v2 (best-effort: only
+    # when the analysis has a cached brief providing the shape/density key).
+    brief = DEFAULT_BRIEF_STORE.get(analysis_id)
+    if brief is not None:
+        exemplars = ExemplarStoreV2().recall(
+            brief.parcel.shape_class, "multifamily", k=2
+        )
+        if exemplars:
+            text += "\n\n" + format_exemplars_for_prompt(exemplars)
+    return text
 
 
 def main() -> None:

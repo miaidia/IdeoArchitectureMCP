@@ -32,6 +32,7 @@ import math
 from typing import Any, Literal
 
 import numpy as np
+import plot_geo
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from shapely import get_coordinates
 from shapely.affinity import rotate, translate
@@ -328,6 +329,15 @@ class RoadElement(BaseModel):
     centerline: dict[str, Any] = Field(description="GeoJSON LineString centerline (EPSG:2180).")
     width_m: float = Field(gt=0, le=30, description="Road width in metres.")
     function: RoadFunction = Field(description="kdw | pozarowa | pieszojezdnia | dojscie.")
+    # Phase 11 etapowanie (plan §11.1.5): optional stage assignment so the staging
+    # consistency checks can test per-stage serviceability. ``None`` keeps the
+    # pre-Phase-11 payloads byte-compatible and is read as "available from the
+    # first stage" (an ASSUMPTION the staging checks record, never silent).
+    stage: int | None = Field(
+        default=None,
+        ge=1,
+        description="Etap realizacji drogi; None = dostępna od pierwszego etapu (założenie).",
+    )
 
     @model_validator(mode="after")
     def _validate_geometry(self) -> RoadElement:
@@ -356,6 +366,17 @@ class ParkingElement(BaseModel):
     spaces: int = Field(ge=0, description="Number of parking spaces provided.")
     serves_buildings: list[str] = Field(
         default_factory=list, description="Names of the buildings this parking serves."
+    )
+    # Phase 11 etapowanie (plan §11.1.5): a parking hall realised in a LATER stage
+    # than a building it serves is a staging-consistency warning (plot_planning
+    # .staging). ``None`` = stage inferred from served buildings / first stage.
+    stage: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Etap realizacji parkingu; None = wnioskowany z obsługiwanych budynków "
+            "(założenie zapisywane przez kontrole etapowania)."
+        ),
     )
 
     @model_validator(mode="after")
@@ -418,7 +439,22 @@ class MasterplanProposal(BaseModel):
         ):
             for i, p in enumerate(polys):
                 geom = ingest_geometry(p, what=f"MasterplanProposal.{label}[{i}]")
-                polys[i] = dict(mapping(geom))
+                repaired = dict(mapping(geom))
+                # Phase 11 etapowanie: a loose polygon may arrive as a GeoJSON
+                # Feature carrying properties (e.g. {"stage": 2} on a plac zabaw —
+                # plot_planning.staging reads it). Preserve the Feature wrapper
+                # (with the REPAIRED geometry inside) instead of stripping it:
+                # every consumer (greenery_geometry/playgrounds_geometry via
+                # ingest_geometry→to_shapely, the renderer's layer._to_shapely,
+                # wt_validators.build_context) already unwraps Features.
+                if p.get("type") == "Feature":
+                    polys[i] = {
+                        "type": "Feature",
+                        "properties": dict(p.get("properties") or {}),
+                        "geometry": repaired,
+                    }
+                else:
+                    polys[i] = repaired
         return self
 
     # ------------------------------------------------------------------ #
@@ -477,37 +513,45 @@ def parse_proposal(payload: dict[str, Any]) -> LayoutProposal | MasterplanPropos
     return LayoutProposal.model_validate(payload)
 
 
+#: Segment uses that count as residential / services for the coarse program key.
+_RESIDENTIAL_SEGMENT_USES = {"mieszkalny", "mieszkalno-uslugowy"}
+_SERVICE_SEGMENT_USES = {"uslugowy", "hotelowy"}
+
+
+def masterplan_program_type(proposal: MasterplanProposal) -> ProgramType:
+    """Coarse program class of a masterplan (exemplar/audit key, Phase 11 §11.1.4).
+
+    Derived from the segment uses (classification only — no legal semantics):
+    residential + services → ``mixed``; purely residential → ``multifamily``;
+    purely services/hotel → ``services``; anything else (garaż/techniczny only)
+    → ``mixed`` as the honest catch-all.
+    """
+    uses = {s.use for b in proposal.buildings for s in b.segments}
+    ground = {
+        s.ground_floor_use for b in proposal.buildings for s in b.segments
+    } - {None}
+    has_residential = bool(uses & _RESIDENTIAL_SEGMENT_USES)
+    has_services = bool(uses & _SERVICE_SEGMENT_USES) or "uslugowy" in ground
+    if has_residential and has_services:
+        return "mixed"
+    if has_residential:
+        return "multifamily"
+    if has_services:
+        return "services"
+    return "mixed"
+
+
 # --------------------------------------------------------------------------- #
 # Parcel shape classification (exemplar-memory key, §4.1.B.5)
 # --------------------------------------------------------------------------- #
 def shape_class_for(parcel: BaseGeometry) -> str:
     """Derive a coarse parcel shape class from simple metrics (aspect ratio / corner).
 
-    Buckets (deliberately coarse so similar parcels collide on the same key):
-
-    * ``corner`` — convex-deficit suggests an L / re-entrant corner shape.
-    * ``narrow`` — bounding-box aspect ratio >= 2.5.
-    * ``square`` — aspect ratio < 1.4.
-    * ``rectangular`` — everything else.
+    Phase 11: the logic moved verbatim to :func:`plot_geo.shape_class` (canonical home,
+    reusable by ``plot_planning.brief`` without importing the agent layer); this wrapper
+    keeps the Phase 4 name + exemplar-memory keys byte-identical.
     """
-    if parcel.is_empty or parcel.area <= 0:
-        return "degenerate"
-    minx, miny, maxx, maxy = parcel.bounds
-    w = maxx - minx
-    h = maxy - miny
-    if w <= 0 or h <= 0:
-        return "degenerate"
-    aspect = max(w, h) / min(w, h)
-    # Convexity deficit: how much smaller the parcel is than its convex hull.
-    hull_area = parcel.convex_hull.area
-    convexity = parcel.area / hull_area if hull_area > 0 else 1.0
-    if convexity < 0.92:
-        return "corner"
-    if aspect >= 2.5:
-        return "narrow"
-    if aspect < 1.4:
-        return "square"
-    return "rectangular"
+    return plot_geo.shape_class(parcel)
 
 
 def aspect_ratio(parcel: BaseGeometry) -> float:

@@ -487,3 +487,39 @@ def nearest_boundary_distance(geom: BaseGeometry, other: BaseGeometry) -> float:
     """Distance (m) between *geom* and *other* via ``shapely.ops.nearest_points``."""
     a, b = nearest_points(geom, other)
     return float(a.distance(b))
+
+
+# --------------------------------------------------------------------------------------
+# Coarse shape classification (Phase 4 exemplar key / Phase 11 design brief)
+# --------------------------------------------------------------------------------------
+def shape_class(geom: BaseGeometry) -> str:
+    """Coarse parcel shape class from simple metrics (aspect ratio / convexity).
+
+    Canonical home of the Phase 4 ``shape_class_for`` logic (moved here in Phase 11 so
+    ``plot_planning.brief`` can reuse it without importing the agent layer;
+    ``plot_agent.drawing.proposal.shape_class_for`` delegates to this function, so the
+    exemplar-memory keys are unchanged). Buckets are deliberately coarse so similar
+    parcels collide on the same key:
+
+    * ``corner`` — convex-deficit suggests an L / re-entrant corner shape.
+    * ``narrow`` — bounding-box aspect ratio >= 2.5.
+    * ``square`` — aspect ratio < 1.4.
+    * ``rectangular`` — everything else.
+    """
+    if geom.is_empty or geom.area <= 0:
+        return "degenerate"
+    minx, miny, maxx, maxy = geom.bounds
+    w = maxx - minx
+    h = maxy - miny
+    if w <= 0 or h <= 0:
+        return "degenerate"
+    aspect = max(w, h) / min(w, h)
+    hull_area = geom.convex_hull.area
+    convexity_ratio = geom.area / hull_area if hull_area > 0 else 1.0
+    if convexity_ratio < 0.92:
+        return "corner"
+    if aspect >= 2.5:
+        return "narrow"
+    if aspect < 1.4:
+        return "square"
+    return "rectangular"

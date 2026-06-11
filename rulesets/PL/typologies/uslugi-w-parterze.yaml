@@ -1,0 +1,41 @@
+# Typologia projektowa (Phase 11 §11.1.2) — SUGESTIA, nigdy walidator (plan §11.4).
+id: PL-TYP-USLUGI-W-PARTERZE-001
+title: Usługi w parterze wzdłuż pierzei publicznych
+jurisdiction: PL
+valid_from: 2026-01-01
+valid_to: null
+source_reference: >-
+  rulesets/PL/typologies/sources.md — design_practice (zasady projektowe, bez
+  mocy prawnej)
+basis: design_practice
+legal_force: none
+severity: soft
+inputs:
+  - srodmiejska
+  - uslugi_expected
+outputs:
+  - typology_recommendation
+summary: >-
+  Usługowy parter (wysokość 3.5-4.5 m w świetle) lokowany wzdłuż frontów do
+  dróg publicznych i placów; mieszkania od 1. piętra wzwyż — parter usługowy
+  buduje PUU i ulicę miejską, jednocześnie odsuwając mieszkania od hałasu.
+applicability:
+  when: {}
+parameters:
+  ground_floor_height_m: {min: 3.5, max: 4.5}
+  ground_floor_depth_m: {min: 10, max: 18}
+pros:
+  - "PUU w parterze podnosi wartość pierzei publicznej i finansuje parter"
+  - "mieszkania zaczynają się nad strefą hałasu i wglądu z ulicy"
+cons:
+  - "usługi wymagają miejsc postojowych wg wskaźnika MPZP dla usług"
+  - "parter usługowy bez ruchu pieszego = pustostany (tylko przy frontach publicznych)"
+preference:
+  base: 0.3
+  bonuses:
+    - when: {uslugi_expected: true}
+      add: 0.3
+      why: "MPZP przewiduje usługi (wskaźnik/przeznaczenie) — parter usługowy realizuje plan"
+    - when: {srodmiejska: true}
+      add: 0.2
+      why: "śródmiejska pierzeja od strony publicznej wymaga aktywnego parteru"

@@ -24,16 +24,25 @@ DEFAULT_EXEMPLAR_DIR = Path(".artifacts/drawing-exemplars")
 
 @dataclass
 class Exemplar:
-    """A stored accepted proposal (§4.1.B.5 few-shot exemplar)."""
+    """A stored accepted proposal (§4.1.B.5 few-shot exemplar).
+
+    Phase 11 (exemplar memory v2, plan §11.1.4) adds two OPTIONAL fields so v1
+    JSON files on disk keep loading unchanged (``Exemplar(**doc)`` with defaults):
+    ``density_class`` — the intensywność band of the third key component
+    ``(shape_class, program_type, density_class)`` — and ``thumbnail_path`` — the
+    rendered-PNG path RELATIVE to the store's base dir (portable across checkouts).
+    """
 
     exemplar_id: str
     shape_class: str
     program_type: str
-    proposal: dict[str, Any]  # LayoutProposal.model_dump()
+    proposal: dict[str, Any]  # LayoutProposal/MasterplanProposal .model_dump()
     score_total: float
     components: dict[str, float] = field(default_factory=dict)
     parcel_area_m2: float | None = None
     created_at: str = ""
+    density_class: str | None = None
+    thumbnail_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

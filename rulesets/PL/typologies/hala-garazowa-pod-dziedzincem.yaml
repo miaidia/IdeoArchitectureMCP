@@ -1,0 +1,43 @@
+# Typologia projektowa (Phase 11 §11.1.2) — SUGESTIA, nigdy walidator (plan §11.4).
+id: PL-TYP-HALA-GARAZOWA-DZIEDZINIEC-001
+title: Hala garażowa pod dziedzińcem (parking podziemny pod terenem wspólnym)
+jurisdiction: PL
+valid_from: 2026-01-01
+valid_to: null
+source_reference: >-
+  rulesets/PL/typologies/sources.md — design_practice (zasady projektowe, bez
+  mocy prawnej)
+basis: design_practice
+legal_force: none
+severity: soft
+inputs:
+  - width_m
+  - parking_indicator_present
+outputs:
+  - typology_recommendation
+summary: >-
+  Jednopoziomowa (rzadziej dwupoziomowa) hala garażowa pod dziedzińcem i
+  budynkami; ok. 25-30 m² powierzchni hali na miejsce postojowe, siatka
+  słupów 7.5-8.1 m zgrana z układem mieszkań; strop hali z nadsypką 0.8-1.2 m
+  pozwala liczyć zieleń dziedzińca częściowo do PBC.
+applicability:
+  when: {}
+parameters:
+  area_per_space_m2: {min: 25, max: 30}
+  column_grid_m: {min: 7.5, max: 8.1}
+  soil_cover_m: {min: 0.8, max: 1.2}
+pros:
+  - "uwalnia teren: dziedziniec bez aut, plac zabaw nad halą"
+  - "miejsca postojowe blisko klatek (zjazd wspólny, mniej dróg naziemnych)"
+cons:
+  - "koszt: wykop + płyta stropowa z obciążeniem zielenią"
+  - "zieleń nad halą liczona do PBC tylko częściowo (przelicznik stropodachu)"
+preference:
+  base: 0.35
+  bonuses:
+    - when: {width_m: {min: 60}}
+      add: 0.15
+      why: "szeroka działka z dziedzińcem: hala pod dziedzińcem domyka bilans postojowy"
+    - when: {parking_indicator_present: true}
+      add: 0.1
+      why: "znany wskaźnik postojowy MPZP — bilans miejsc do zrealizowania w hali"

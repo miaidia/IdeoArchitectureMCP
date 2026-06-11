@@ -21,6 +21,7 @@ from plot_reports.artifacts import (
     S3ArtifactStore,
     get_artifact_store,
 )
+from plot_reports.koncepcja import compliance_summary, render_koncepcja_markdown
 from plot_reports.preview import (
     preview_png_bytes,
     preview_style_metadata,
@@ -72,6 +73,9 @@ __all__ = [
     "render_json",
     "render_envelope_map",
     "headline_numbers",
+    # koncepcja deliverable (Phase 11 §11.1.7)
+    "render_koncepcja_markdown",
+    "compliance_summary",
     # artifacts
     "ArtifactStore",
     "LocalArtifactStore",
