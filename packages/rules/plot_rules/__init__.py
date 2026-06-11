@@ -16,7 +16,7 @@ from plot_rules.engine import (
     override_subject,
     override_targets_rule,
 )
-from plot_rules.loader import Rule, RulesetRegistry, load_rulesets
+from plot_rules.loader import Rule, RulesetRegistry, clear_registry_cache, load_rulesets
 from plot_rules.overrides import DEFAULT_OVERRIDE_STORE, OverrideStore
 from plot_rules.schema import RULESET_SCHEMA, validate_rule_document
 
@@ -33,6 +33,7 @@ __all__ = [
     "RulesetRegistry",
     "evaluate",
     "load_rulesets",
+    "clear_registry_cache",
     "override_subject",
     "override_targets_rule",
     "validate_rule_document",

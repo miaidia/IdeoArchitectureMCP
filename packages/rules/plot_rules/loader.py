@@ -19,6 +19,7 @@ YAML files (Phase 8 anti-pattern guard) — this module stays value-free.
 from __future__ import annotations
 
 import hashlib
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -87,17 +88,80 @@ def _category_for(path: Path, root: Path) -> str:
     return rel.parts[0] if len(rel.parts) > 1 else "uncategorized"
 
 
-def load_rulesets(directory: str | Path = "rulesets/PL") -> RulesetRegistry:
-    """Load every ``*.yaml``/``*.yml`` under ``directory`` fresh into a registry.
+# --------------------------------------------------------------------------- #
+# Phase 14B (F-0509): in-memory registry cache, gated behind dev_hot_reload=False.
+#
+# * dev (PLOT_DEV_HOT_RELOAD=true): every call parses fresh — the Phase 2
+#   hot-reload contract is byte-identical to the pre-cache behaviour.
+# * prod (default, dev_hot_reload=False): the parsed registry is cached per
+#   directory and re-validated by a cheap stat fingerprint (path, mtime_ns,
+#   size of every YAML) on each call — an edited/added/removed rule file still
+#   invalidates the cache (§18.3 "ruleset update without code change"), but the
+#   hot path skips re-reading + re-validating every YAML document.
+# --------------------------------------------------------------------------- #
+_REGISTRY_CACHE: dict[str, tuple[tuple[tuple[str, int, int], ...], RulesetRegistry]] = {}
+_REGISTRY_CACHE_LOCK = threading.Lock()
+_REGISTRY_CACHE_MAX = 4  # tiny LRU — one entry per ruleset dir in practice
 
-    No caching across calls (dev hot-reload requirement, Phase 2 §2.1.3): every call
-    re-reads the files from disk and recomputes ``ruleset_version`` from their bytes.
+
+def _registry_fingerprint(root: Path) -> tuple[tuple[str, int, int], ...]:
+    """Cheap stat fingerprint over every rule YAML (no file reads)."""
+    out: list[tuple[str, int, int]] = []
+    for yaml_path in sorted(root.rglob("*.y*ml")):
+        try:
+            st = yaml_path.stat()
+        except OSError:
+            continue
+        out.append((str(yaml_path), st.st_mtime_ns, st.st_size))
+    return tuple(out)
+
+
+def _cache_enabled() -> bool:
+    """Cache only when dev hot-reload is OFF (plan: gate LRU behind DEV_HOT_RELOAD=false)."""
+    from plot_shared import get_settings  # local import: keep module import light
+
+    return not get_settings().dev_hot_reload
+
+
+def clear_registry_cache() -> None:
+    """Drop the cached registries (test seam / explicit invalidation)."""
+    with _REGISTRY_CACHE_LOCK:
+        _REGISTRY_CACHE.clear()
+
+
+def load_rulesets(directory: str | Path = "rulesets/PL") -> RulesetRegistry:
+    """Load every ``*.yaml``/``*.yml`` under ``directory`` into a registry.
+
+    Dev (``dev_hot_reload=True``): no caching across calls (Phase 2 §2.1.3) —
+    every call re-reads the files from disk and recomputes ``ruleset_version``
+    from their bytes. Prod: a stat-fingerprint cache (F-0509) returns the parsed
+    registry when no rule file changed; any mtime/size/path change re-parses.
     Missing directory yields an empty registry (so the server still boots in CI).
     """
     root = Path(directory)
     if not root.exists():
         return RulesetRegistry(root=str(root))
 
+    if _cache_enabled():
+        key = str(root.resolve())
+        fingerprint = _registry_fingerprint(root)
+        with _REGISTRY_CACHE_LOCK:
+            cached = _REGISTRY_CACHE.get(key)
+            if cached is not None and cached[0] == fingerprint:
+                return cached[1]
+        registry = _load_rulesets_fresh(root)
+        with _REGISTRY_CACHE_LOCK:
+            _REGISTRY_CACHE.pop(key, None)
+            _REGISTRY_CACHE[key] = (fingerprint, registry)
+            while len(_REGISTRY_CACHE) > _REGISTRY_CACHE_MAX:
+                _REGISTRY_CACHE.pop(next(iter(_REGISTRY_CACHE)))
+        return registry
+
+    return _load_rulesets_fresh(root)
+
+
+def _load_rulesets_fresh(root: Path) -> RulesetRegistry:
+    """The original fresh-per-call loader body (unchanged semantics)."""
     rules: list[Rule] = []
     errors: list[str] = []
     hasher = hashlib.sha256()

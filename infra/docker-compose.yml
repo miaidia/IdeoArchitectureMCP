@@ -4,6 +4,34 @@
 name: plot-analyzer
 
 services:
+  # Combined API (/api) + MCP streamable-http (/mcp) in ONE process (Phase 14B;
+  # the Phase 0.1 mount pattern — both surfaces share the in-memory stores).
+  # API keys come from the env ONLY (PLOT_API_KEYS="key:role:tenant,...").
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      PLOT_API_KEYS: ${PLOT_API_KEYS:-}            # empty = fail closed (F-0477)
+      PLOT_DATABASE_URL: ${PLOT_DATABASE_URL:-postgresql+psycopg://plot:plot@postgis:5432/plot}
+      PLOT_REDIS_URL: ${PLOT_REDIS_URL:-redis://redis:6379/0}
+      PLOT_S3_ENDPOINT_URL: ${PLOT_S3_ENDPOINT_URL:-http://minio:9000}
+      PLOT_DEV_HOT_RELOAD: "false"
+    depends_on:
+      postgis:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/healthz')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
   postgis:
     image: postgis/postgis:16-3.4
     environment:

@@ -1,13 +1,36 @@
-# plot-api — workspace member (app entry point). Stub; implementation deferred to a later phase.
+# plot-api — HTTP API app (Phase 14B): FastAPI surface over the SAME §27 use-cases as MCP.
 [project]
 name = "plot-api"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["plot-shared", "plot-domain"]
+dependencies = [
+    # HTTP framework + OpenAPI auto-schema (F-0463; §27).
+    "fastapi>=0.111",
+    # ASGI server (combined /api + /mcp process; Phase 0.1 mount pattern).
+    "uvicorn>=0.30",
+    # CLI + SDK transport (the CLI drives the API over the plot_shared client).
+    "httpx>=0.27",
+    "plot-shared",
+    "plot-domain",
+    # The §27 SHARED use-case layer (plot_mcp_server.usecases) — both surfaces
+    # call the same functions, zero logic duplication (v1 Phase 12 §12.4 guard).
+    "plot-mcp-server",
+    # Use-cases reach the orchestration layer + artifacts + the upload sandbox.
+    "plot-agent",
+    "plot-reports",
+    "plot-security",
+]
+
+[project.scripts]
+plot-analyzer = "plot_api.cli:main"
 
 [tool.uv.sources]
 plot-shared = { workspace = true }
 plot-domain = { workspace = true }
+plot-mcp-server = { workspace = true }
+plot-agent = { workspace = true }
+plot-reports = { workspace = true }
+plot-security = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

@@ -279,7 +279,10 @@ def report_generate(
             description=(
                 "md | html | pdf | json | png | koncepcja (Phase 11: multi-building "
                 "chłonność concept — plan render + per-building/per-stage PUM tables + "
-                "WT/ppoż compliance + design rationale + questions for the gmina)."
+                "WT/ppoż compliance + design rationale + questions for the gmina). "
+                "html/pdf (Phase 14, §31) render from the SAME report model as md/json "
+                "(with variant_id → the koncepcja deliverable); pdf reports "
+                "pdf_unavailable honestly when the weasyprint system stack is absent."
             )
         ),
     ] = "md",
@@ -287,26 +290,55 @@ def report_generate(
         str | None,
         Field(
             description=(
-                "Masterplan variant id for format='koncepcja' (from propose_layout's "
-                "structuredContent.variant_id); default = the latest stored variant."
+                "Masterplan variant id for format='koncepcja'/'html'/'pdf' (from "
+                "propose_layout's structuredContent.variant_id); default = the latest "
+                "stored variant (koncepcja) / the screening report (html/pdf)."
+            )
+        ),
+    ] = None,
+    audience: Annotated[
+        str,
+        Field(
+            description=(
+                "Report audience (F-0392): architect | investor | lawyer | bank — "
+                "same numbers, different section selection (config-driven)."
+            )
+        ),
+    ] = "architect",
+    *,
+    ctx: Context[ServerSession, AppContext],
+) -> dict[str, Any]:
+    # Large artifacts are returned as MCP resources, never inlined (NFR-PERF-009).
+    return _app(ctx).usecases.report_generate(analysis_id, format, variant_id, audience)
+
+
+@mcp.tool(annotations=_READ_ONLY, description="Export GIS/CAD/BIM layers.")
+def export_layers(
+    analysis_id: Annotated[str | None, Field(description="Analysis run id.")] = None,
+    format: Annotated[
+        str,
+        Field(
+            description=(
+                "geojson | gpkg | dxf | ifc (Phase 14). dxf: PA-* layer convention, "
+                "metres ($INSUNITS=6). ifc: IFC4 massing model (IfcProject/Site/"
+                "Building/Storey + extruded footprints; EPSG:2180 IfcMapConversion; "
+                "NO walls/slabs/windows). Artifact via resource_link, never inlined."
+            )
+        ),
+    ] = "gpkg",
+    variant_id: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Masterplan variant id to export (from propose_layout); default = the "
+                "analysis' latest variant, else the screening layers (geojson/gpkg)."
             )
         ),
     ] = None,
     *,
     ctx: Context[ServerSession, AppContext],
 ) -> dict[str, Any]:
-    # Large artifacts are returned as MCP resources, never inlined (NFR-PERF-009).
-    return _app(ctx).usecases.report_generate(analysis_id, format, variant_id)
-
-
-@mcp.tool(annotations=_READ_ONLY, description="Export GIS/CAD layers.")
-def export_layers(
-    analysis_id: Annotated[str | None, Field(description="Analysis run id.")] = None,
-    format: Annotated[str, Field(description="gpkg | dxf | geojson.")] = "gpkg",
-    *,
-    ctx: Context[ServerSession, AppContext],
-) -> dict[str, Any]:
-    return _app(ctx).usecases.export_layers(analysis_id, format)
+    return _app(ctx).usecases.export_layers(analysis_id, format, variant_id)
 
 
 @mcp.tool(annotations=_READ_ONLY, description="Analyze many parcels.")
@@ -755,28 +787,12 @@ def resource_analysis_unknowns(analysis_id: str) -> str:
 @mcp.resource("analysis://{analysis_id}/buildable-envelope.geojson", mime_type="application/geo+json")
 def resource_buildable_envelope(analysis_id: str) -> str:
     # GeoJSON returned as a resource ON DEMAND, never inlined into tool results
-    # (NFR-PERF-009 / §10.4). Builds a FeatureCollection of the buildable polygon, its
-    # largest inscribed rectangle and the parcel from the stored result.
-    from plot_agent.analysis import DEFAULT_STORE
+    # (NFR-PERF-009 / §10.4). Phase 14B: the FeatureCollection assembly moved to
+    # the SHARED use-case (one assembly serving both this resource and the §27
+    # HTTP GET /v1/analyses/{id}/buildable-envelope — zero logic duplication).
+    from plot_mcp_server.usecases import buildable_envelope_geojson
 
-    result = DEFAULT_STORE.get(analysis_id)
-    if result is None or result.buildable_envelope is None:
-        return json.dumps({"type": "FeatureCollection", "features": [], "status": "not_found"})
-    env = result.buildable_envelope
-    features: list[dict[str, Any]] = []
-    if result.parcel and result.parcel.geometry:
-        features.append({"type": "Feature", "properties": {"role": "parcel"}, "geometry": result.parcel.geometry})
-    if env.geometry:
-        features.append(
-            {"type": "Feature", "properties": {"role": "buildable_envelope", "area_m2": env.area_m2,
-                                               "confidence": env.confidence}, "geometry": env.geometry}
-        )
-    if env.largest_inscribed_rectangle:
-        features.append(
-            {"type": "Feature", "properties": {"role": "largest_inscribed_rectangle"},
-             "geometry": env.largest_inscribed_rectangle}
-        )
-    return json.dumps({"type": "FeatureCollection", "crs_note": "EPSG:2180", "features": features})
+    return json.dumps(buildable_envelope_geojson(analysis_id))
 
 
 @mcp.resource(
@@ -868,6 +884,37 @@ def resource_map_preview(analysis_id: str) -> bytes:
     from plot_reports import preview_png_bytes
 
     return preview_png_bytes(analysis_id)
+
+
+@mcp.resource("analysis://{analysis_id}/report.html", mime_type="text/html")
+def resource_report_html(analysis_id: str) -> str:
+    # Phase 14 (§31): the screening report as HTML — rendered ON DEMAND from the
+    # SAME unified ReportModel the md/json formats use (one model, all formats).
+    from plot_agent.analysis import DEFAULT_STORE
+    from plot_reports import build_screening_model, render_model_html
+
+    result = DEFAULT_STORE.get(analysis_id)
+    if result is None:
+        return (
+            f"<!DOCTYPE html><html><body><p>Brak zapisanej analizy "
+            f"{analysis_id}. Uruchom parcel_analyze.</p></body></html>"
+        )
+    return render_model_html(build_screening_model(result))
+
+
+@mcp.resource(
+    "analysis://{analysis_id}/export/{filename}",
+    mime_type="application/octet-stream",
+)
+def resource_export_file(analysis_id: str, filename: str) -> bytes:
+    # Phase 14: serves the export_layers / report_generate(html|pdf) artifacts
+    # (GeoJSON/GPKG/DXF/IFC/HTML/PDF/model-JSON) from the ArtifactStore ON
+    # DEMAND — tool results carry only the resource_link, bytes are never
+    # inlined (NFR-PERF-009). bytes → BlobResourceContents (see map-preview).
+    # The store's path guard rejects traversal in `filename` (Phase 3 §16).
+    from plot_reports import get_artifact_store
+
+    return get_artifact_store().get(f"analysis/{analysis_id}/export/{filename}")
 
 
 @mcp.resource("planning://{municipality_id}/acts", mime_type="application/json")

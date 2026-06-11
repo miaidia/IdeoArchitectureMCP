@@ -23,5 +23,38 @@ export PATH="$HOME/.local/bin:$PATH"
 uv sync
 uv run ruff check .
 uv run mypy packages
+uv run mypy apps
 uv run pytest -q
 ```
+
+## HTTP API + MCP (Phase 14B)
+
+Both surfaces share the SAME domain use-cases (§27 — `plot_mcp_server.usecases`);
+the API adds zero logic (a parity test enforces it).
+
+```bash
+# API only (dev):
+PLOT_API_KEYS="devkey:admin:local" uv run uvicorn "plot_api.app:create_app" --factory --port 8000
+# Combined API (/api) + MCP streamable-http (/mcp) — one process, shared stores:
+PLOT_API_KEYS="devkey:admin:local" uv run uvicorn plot_api.main:build_combined_app --factory --port 8000
+
+# CLI (thin client over the API via the plot_shared SDK):
+export PLOT_ANALYZER_API_KEY=devkey
+uv run plot-analyzer analyze 141201_1.0001.1867/2
+uv run plot-analyzer report <analysis_id> --format md
+
+# Docker (combined image; see infra/docker-compose.yml for the full stack):
+docker compose -f infra/docker-compose.yml up --build api
+```
+
+Auth: `X-API-Key` header; keys via `PLOT_API_KEYS="key:role:tenant,..."`
+(role ∈ `read|analyst|admin`; empty config = fail closed). OpenAPI at
+`/openapi.json`, liveness at `/healthz`, Prometheus at `/metrics`.
+
+**Deployment-scope security (documented, not faked in-process):** TLS
+termination + rate limiting (reverse proxy), encryption at rest, IdP/OIDC RBAC,
+per-tenant storage isolation (PostGIS RLS), antivirus engine for uploads (the
+sandbox exposes an `AvScanner` hook and honestly reports `not_scanned`),
+signed artifacts/SBOM publication (CI runs `pip-audit` + dependency listing;
+signing happens in the release pipeline). A TypeScript SDK (F-0465) is NOT
+shipped — generate one from `/openapi.json` if needed.

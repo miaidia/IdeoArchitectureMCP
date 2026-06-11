@@ -110,8 +110,20 @@ async def run_full_due_diligence(
     # a crashing module degrades to ITS theme's explicit unknown + a partial
     # result, never killing the whole analysis.
     # ------------------------------------------------------------------ #
+    # Phase 14B (F-0517/0525): the site sources share the screening's analysis-level
+    # deadline budget — an exceeded deadline degrades them to an EXPLICIT
+    # source_unavailable/unknown (partial result), never a silent skip.
+    from plot_agent.analysis.quick_screening import deadline_remaining_s
+
+    def _deadline_exceeded() -> bool:
+        remaining = deadline_remaining_s(internals.started_monotonic)
+        return remaining is not None and remaining <= 0
+
     if connectors.terrain is None:
         site.terrain = terrain_unavailable("source_not_configured")
+    elif _deadline_exceeded():
+        any_site_source_failed = True
+        site.terrain = terrain_unavailable("analysis_deadline_exceeded")
     else:
         assert internals.bbox is not None
         fetch = await connectors.terrain.fetch(internals.bbox)
@@ -247,6 +259,21 @@ async def run_full_due_diligence(
                 severity=Severity.MEDIUM,
                 reason="source_not_configured",
                 suggested_action="Skonfigurować źródło budynków BDOT10k dla analizy sąsiedztwa.",
+            )
+        )
+    elif _deadline_exceeded():
+        any_site_source_failed = True
+        result.unknowns.append(
+            UnknownItem(
+                id=f"unk:neighbors:{result.analysis_id[:8]}",
+                analysis_id=result.analysis_id,
+                topic="Zabudowa sąsiednia (BDOT10k)",
+                severity=Severity.MEDIUM,
+                reason="analysis_deadline_exceeded",
+                suggested_action=(
+                    "Budżet czasowy analizy wyczerpany (F-0517/0525) — ponowić analizę "
+                    "z większym PLOT_ANALYSIS_DEADLINE_S; sąsiedztwo niezweryfikowane."
+                ),
             )
         )
     else:

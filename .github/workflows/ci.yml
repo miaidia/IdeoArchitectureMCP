@@ -27,5 +27,22 @@ jobs:
       - name: Mypy (type check)
         run: uv run mypy packages
 
+      - name: Mypy (apps)
+        run: uv run mypy apps
+
       - name: Pytest
         run: uv run pytest -q
+
+      # --- Supply-chain visibility (Phase 14B; F-0500-0502) ----------------- #
+      # pip-audit checks the locked environment against known advisories and
+      # `uv tree` records the dependency/license surface in the CI log.
+      # Advisory steps are continue-on-error: they INFORM, the gate is the
+      # tests above. Artifact SIGNING + SBOM publication (F-0499/0501) are
+      # release-pipeline/deployment scope - documented in README, not faked.
+      - name: Dependency audit (advisories, informational)
+        continue-on-error: true
+        run: uvx pip-audit --skip-editable || true
+
+      - name: Dependency tree (license/supply-chain listing)
+        continue-on-error: true
+        run: uv tree --depth 1

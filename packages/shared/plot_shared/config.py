@@ -114,6 +114,71 @@ class Settings(BaseSettings):
         description="Default monitoring_create check interval (§4.5).",
     )
 
+    # --- HTTP API auth (Phase 14B; F-0477/0479/0480 — env-only, no secrets in repo) ---
+    # Comma-separated "key:role:tenant" triples, e.g.
+    #   PLOT_API_KEYS="s3cretA:admin:tenant-a,s3cretB:read:tenant-b"
+    # role ∈ read | analyst | admin. EMPTY (the safe default) means the API
+    # accepts NO authenticated requests (fail closed) — production injects real
+    # keys via the environment only (F-0477/0478). The key VALUE is never
+    # logged; audit entries carry a sha256-derived key id.
+    api_keys: str = Field(
+        default="",
+        description=(
+            "API keys as 'key:role:tenant' comma-separated triples (F-0479/0480). "
+            "Empty = no access (fail closed). Env-only — never commit real keys."
+        ),
+    )
+
+    # --- Upload sandbox (Phase 14B; F-0491/0492/0493, §16) ---
+    upload_max_bytes: int = Field(
+        default=20 * 1024 * 1024,
+        gt=0,
+        description="Max accepted upload size in bytes (F-0493; default 20 MB).",
+    )
+    upload_max_chars: int = Field(
+        default=1_000_000,
+        gt=0,
+        description="Max extracted text characters retained from an upload (NFR-SEC-009).",
+    )
+    upload_max_pages: int = Field(
+        default=500,
+        gt=0,
+        description=(
+            "Max estimated PDF page count for uploads (heuristic /Type /Page scan — "
+            "documented estimate, not a full PDF parse)."
+        ),
+    )
+
+    # --- Performance (Phase 14B; F-0510/0517/0525) ---
+    parallel_fetch_limit: int = Field(
+        default=8,
+        gt=0,
+        description=(
+            "Max concurrent risk-layer fetches per analysis (F-0510). Only applies "
+            "when PLOT_BACKPRESSURE_DELAY_S is 0 — a configured backpressure delay "
+            "keeps fetches sequential (NFR-PERF-014)."
+        ),
+    )
+    analysis_deadline_s: float = Field(
+        default=0.0,
+        ge=0.0,
+        description=(
+            "Total analysis-level deadline in seconds for source fetches (F-0517/0525). "
+            "0 disables. When exceeded, remaining themes degrade to source_unavailable "
+            "(explicit unknowns, partial result) — never silently dropped."
+        ),
+    )
+    perf_quick_budget_s: float = Field(
+        default=5.0,
+        gt=0.0,
+        description="NFR-PERF budget for quick_screening on the golden parcel (benchmark tests).",
+    )
+    perf_layout_budget_s: float = Field(
+        default=10.0,
+        gt=0.0,
+        description="NFR-PERF budget for one propose_layout masterplan iteration (benchmark tests).",
+    )
+
     # --- Development / analysis defaults ---
     dev_hot_reload: bool = Field(
         default=False,

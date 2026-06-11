@@ -443,37 +443,62 @@ def planning_parse_document(
         validate_candidates,
     )
 
+    source_type = "text"
     if text is None:
         if file_id:
+            # Phase 14B: read the sandboxed upload's extracted text (F-0491–0493).
+            from plot_security import DEFAULT_UPLOAD_STORE
+
+            record = DEFAULT_UPLOAD_STORE.get(file_id)
+            if record is None:
+                return {
+                    "file_id": file_id,
+                    "source_type": "file",
+                    "indicators": [],
+                    "evidence": [],
+                    "unknowns": [],
+                    "rejected": [],
+                    "status": "file_not_found",
+                    "note": (
+                        "Brak uploadu o tym file_id w sandboxie — wgrać plik przez "
+                        "HTTP API (POST /v1/documents/ingest) albo podać 'text'."
+                    ),
+                }
+            if record.text is None:
+                return {
+                    "file_id": file_id,
+                    "source_type": "file",
+                    "indicators": [],
+                    "evidence": [],
+                    "unknowns": [],
+                    "rejected": [],
+                    "status": "text_extraction_unavailable",
+                    "note": (
+                        f"Upload '{record.filename}' ({record.declared_type}) nie ma "
+                        "wyekstrahowanego tekstu — ekstrakcja tekstu z PDF nie jest "
+                        "dostępna w tym środowisku (uczciwy brak, §21); dostarczyć "
+                        "treść parametrem 'text'."
+                    ),
+                }
+            text = record.text
+            source_type = "file"
+        else:
             return {
-                "file_id": file_id,
-                "source_type": "file",
+                "file_id": None,
+                "source_type": None,
                 "indicators": [],
                 "evidence": [],
                 "unknowns": [],
                 "rejected": [],
-                "status": "file_store_unavailable",
-                "note": (
-                    "Sandboxowany magazyn plików (document_ingest) wchodzi w Fazie 12 — "
-                    "dostarczyć treść dokumentu parametrem 'text'."
-                ),
+                "status": "no_input",
+                "note": "Wymagany file_id albo text.",
             }
-        return {
-            "file_id": None,
-            "source_type": None,
-            "indicators": [],
-            "evidence": [],
-            "unknowns": [],
-            "rejected": [],
-            "status": "no_input",
-            "note": "Wymagany file_id albo text.",
-        }
 
     screen = screen_document(text)
     if not screen.ok:
         return {
             "file_id": file_id,
-            "source_type": "text",
+            "source_type": source_type,
             "indicators": [],
             "evidence": [],
             "unknowns": [],
@@ -549,7 +574,7 @@ def planning_parse_document(
 
     return {
         "file_id": file_id,
-        "source_type": "text",
+        "source_type": source_type,
         "mode": mode,
         "indicators": indicators,
         "evidence": evidence,
@@ -624,6 +649,46 @@ def constraints_compute(analysis_id: str | None) -> dict[str, Any]:
         },
         "inter_building_rules": _inter_building_rules_summary(),
     }
+
+
+def buildable_envelope_geojson(analysis_id: str) -> dict[str, Any]:
+    """The buildable-envelope FeatureCollection for a stored analysis (§10.4).
+
+    Shared by the MCP ``analysis://{id}/buildable-envelope.geojson`` resource AND
+    the HTTP ``GET /v1/analyses/{id}/buildable-envelope`` endpoint (§27 — one
+    assembly, two surfaces). Fetched on demand, never inlined into tool results
+    (NFR-PERF-009).
+    """
+    result = DEFAULT_STORE.get(analysis_id)
+    if result is None or result.buildable_envelope is None:
+        return {"type": "FeatureCollection", "features": [], "status": "not_found"}
+    env = result.buildable_envelope
+    features: list[dict[str, Any]] = []
+    if result.parcel and result.parcel.geometry:
+        features.append(
+            {"type": "Feature", "properties": {"role": "parcel"}, "geometry": result.parcel.geometry}
+        )
+    if env.geometry:
+        features.append(
+            {
+                "type": "Feature",
+                "properties": {
+                    "role": "buildable_envelope",
+                    "area_m2": env.area_m2,
+                    "confidence": env.confidence,
+                },
+                "geometry": env.geometry,
+            }
+        )
+    if env.largest_inscribed_rectangle:
+        features.append(
+            {
+                "type": "Feature",
+                "properties": {"role": "largest_inscribed_rectangle"},
+                "geometry": env.largest_inscribed_rectangle,
+            }
+        )
+    return {"type": "FeatureCollection", "crs_note": "EPSG:2180", "features": features}
 
 
 def design_brief_for_analysis(
@@ -796,23 +861,61 @@ def risks_list(analysis_id: str | None) -> dict[str, Any]:
 
 
 def sources_collect(analysis_id: str | None) -> dict[str, Any]:
-    """Return the source records + evidence pack for a stored analysis (§5 / NFR-AUD-001)."""
+    """Return the source records + evidence pack for a stored analysis (§5 / NFR-AUD-001).
+
+    Phase 14 (F-0393/F-0407): the evidence pack (all SourceRecords +
+    EvidenceItems with their claims/citations) is ALSO persisted as a standalone
+    JSON artifact via the ArtifactStore so it is downloadable independently of
+    the report — ``evidence_pack_uri`` + the ``analysis://{id}/evidence``
+    resource link travel in the result (never the inlined pack twice).
+    """
+    import json as _json
+
+    from plot_reports import get_artifact_store
+
     result = DEFAULT_STORE.get(analysis_id) if analysis_id else None
     if result is None:
         return {"analysis_id": analysis_id, "sources": [], "evidence": [], "status": "not_found"}
     sources = result.planning.get("_sources", []) if isinstance(result.planning, dict) else []
+    evidence = [e.model_dump(mode="json") for e in result.evidence]
+    pack = {
+        "analysis_id": analysis_id,
+        "generated_at": _now().isoformat(),
+        "sources": sources,
+        "evidence": evidence,
+        # Citations: every evidence claim with its backing source (the §5 chain).
+        "citations": [
+            {
+                "claim": e["claim"],
+                "source_id": e["source_id"],
+                "subject": f"{e['subject_type']}:{e['subject_id']}",
+                "confidence": e["confidence"],
+            }
+            for e in evidence
+        ],
+    }
+    pack_uri = get_artifact_store().put(
+        f"analysis/{analysis_id}/evidence-pack.json",
+        _json.dumps(pack, ensure_ascii=False, indent=2).encode("utf-8"),
+        "application/json",
+    )
     return {
         "analysis_id": analysis_id,
         "sources": sources,
-        "evidence": [e.model_dump(mode="json") for e in result.evidence],
+        "evidence": evidence,
         "evidence_count": len(result.evidence),
+        "evidence_pack_uri": pack_uri,
+        "evidence_pack_resource": f"analysis://{analysis_id}/evidence",
     }
 
 
 def report_generate(
-    analysis_id: str | None, fmt: str, variant_id: str | None = None
+    analysis_id: str | None,
+    fmt: str,
+    variant_id: str | None = None,
+    audience: str = "architect",
 ) -> dict[str, Any]:
-    """Generate a report artifact for a stored analysis (Phase 7 §E; §22 template).
+    """Generate a report artifact for a stored analysis (Phase 7 §E; §22; Phase 14 §31).
 
     * ``md``  → the §22 Markdown report (returned inline as ``content`` — it is small text).
     * ``json``→ the AnalysisResult (§10.7) returned as ``content`` (and the canonical contract).
@@ -823,25 +926,44 @@ def report_generate(
       deliverable assembled from the variant store + capacity metrics + design
       brief + rule/staging checks + the design-rationale audit; ``variant_id``
       selects the masterplan variant (default: the latest stored one).
+    * ``html`` / ``pdf`` (Phase 14, §31 DoD) → rendered from the unified
+      :class:`~plot_reports.ReportModel` (the SAME model behind md/json — one
+      model, all formats): with an explicit ``variant_id`` the koncepcja
+      deliverable, otherwise the screening report. The HTML/PDF artifact AND
+      the model JSON land in the ArtifactStore (``resource_link``, never
+      inlined). PDF needs the weasyprint system stack — when absent, the
+      result is an honest ``pdf_unavailable`` with the reason (never a fake).
 
-    The MD and JSON share one result object, so their headline numbers match by
-    construction (§7.3). HTML/PDF/audience variants are Phase 12.
+    ``audience`` (F-0392, F-0403–F-0406: ``architect | investor | lawyer |
+    bank``) selects the report SECTION LIST for md/html/pdf/koncepcja — same
+    numbers, different emphasis (config in ``plot_reports.model``).
     """
     result = DEFAULT_STORE.get(analysis_id) if analysis_id else None
 
     if fmt == "koncepcja":
-        return _report_koncepcja(analysis_id, variant_id)
+        return _report_koncepcja(analysis_id, variant_id, audience=audience)
+
+    if fmt in ("html", "pdf"):
+        return _report_model_format(analysis_id, fmt, variant_id, audience)
 
     if fmt in ("md", "markdown"):
-        from plot_reports import headline_numbers, render_markdown
+        from plot_reports import build_screening_model, headline_numbers, render_model_markdown
 
         if result is None:
             return {"analysis_id": analysis_id, "format": "md", "status": "not_found"}
+        # One model, all formats (§31): the architect output equals the Phase 7
+        # render_markdown byte-for-byte; other audiences select fewer sections.
+        model = build_screening_model(result, audience=audience)  # type: ignore[arg-type]
+        model, pii_block = _shared_export_redaction(model, audience)
         return {
             "analysis_id": analysis_id,
             "format": "md",
-            "content": render_markdown(result),
+            "audience": audience,
+            "content": render_model_markdown(model),
             "headline_numbers": headline_numbers(result),
+            "report_version": model.report_version,
+            "analysis_snapshot_hash": model.analysis_snapshot_hash,
+            "pii_redaction": pii_block,
             "status": "rendered",
         }
 
@@ -886,9 +1008,28 @@ def report_generate(
         "analysis_id": analysis_id,
         "format": fmt,
         "artifact_uri": None,
-        "status": "not_yet_computed",
-        "note": "HTML/PDF/audience variants land in Phase 12 (§31).",
+        "status": "unsupported_format",
+        "note": (
+            "Obsługiwane formaty raportu: md | html | pdf | json | png | "
+            "koncepcja (GIS/CAD przez export_layers)."
+        ),
     }
+
+
+def _shared_export_redaction(model: Any, audience: str) -> tuple[Any, dict[str, Any]]:
+    """PII redaction pass for SHARED report exports (Phase 14B; F-0483).
+
+    ``audience != architect`` (investor/lawyer/bank) is the share channel —
+    parcel-owner fields (none are stored today; the hook guards future sources)
+    are stripped from the :class:`~plot_reports.ReportModel` before rendering.
+    Returns ``(model, pii_block)`` where the block records what was redacted.
+    """
+    from plot_reports import redact_model_for_sharing
+
+    if audience == "architect":
+        return model, {"applied": False, "redacted_fields": []}
+    redacted_model, paths = redact_model_for_sharing(model)
+    return redacted_model, {"applied": bool(paths), "redacted_fields": paths}
 
 
 def map_preview_render(analysis_id: str | None, fmt: str = "png") -> Any:
@@ -952,8 +1093,8 @@ def _variant_lineage_entries(variant: Any) -> list[dict[str, Any]]:
     return chain
 
 
-def _report_koncepcja(
-    analysis_id: str | None, variant_id: str | None = None
+def _assemble_koncepcja(
+    analysis_id: str | None, variant_id: str | None = None, audience: str = "architect"
 ) -> dict[str, Any]:
     """Assemble the koncepcja deliverable (Phase 11 §11.1.7) — no recomputation.
 
@@ -971,16 +1112,21 @@ def _report_koncepcja(
     The plan render (renderer v2 WITH the stage-table panel) uses the same parcel
     geometry the variant was scored against: the variant's OWN analysis context
     when it was analysis-bound (Phase 12), else the unbound drawing context (test
-    seam / Phase 3 sample). The Markdown is returned
-    inline (small text, like ``md``) and also served by the variant-scoped
+    seam / Phase 3 sample).
+
+    Phase 14 (§31): returns the assembly — the unified ``ReportModel`` (built
+    ONCE; md/html/pdf/json render from it) + the variant + the plan-PNG artifact
+    — or the ``not_found`` result dict when no variant exists. The Markdown path
+    (:func:`_report_koncepcja`) returns the text inline (small, like ``md``) and
+    it is also served by the variant-scoped
     ``analysis://{analysis_id}/masterplan/{variant_id}/report.md`` resource —
-    the variant-scoped resource was chosen over reusing ``analysis://{id}/report.md``
-    because a koncepcja is per-VARIANT (several iterations may be stored per
-    analysis), mirroring the existing ``metrics.json`` resource pattern.
+    chosen over reusing ``analysis://{id}/report.md`` because a koncepcja is
+    per-VARIANT (several iterations may be stored per analysis), mirroring the
+    existing ``metrics.json`` resource pattern.
     """
     from plot_agent.drawing import DEFAULT_VARIANT_STORE
     from plot_planning import DEFAULT_BRIEF_STORE
-    from plot_reports import get_artifact_store, render_koncepcja_markdown, render_masterplan
+    from plot_reports import build_koncepcja_model, get_artifact_store, render_masterplan
 
     aid = analysis_id or ADHOC_ANALYSIS_ID
     # Variant resolution (F1): an explicit variant_id is honoured as-is (it may be
@@ -1036,9 +1182,10 @@ def _report_koncepcja(
     store = get_artifact_store()
     png_key = f"analysis/{aid}/koncepcja-{variant.id.replace(':', '-')}.png"
     png_uri = store.put_render(png_key, render)
-    report_resource = f"analysis://{aid}/masterplan/{variant.id}/report.md"
 
-    content = render_koncepcja_markdown(
+    # Phase 14 (§31): the unified ReportModel is assembled ONCE here; the
+    # md/html/pdf/json renderers all consume THIS model (one model, all formats).
+    model = build_koncepcja_model(
         analysis_id=aid,
         variant=variant,
         generated_at=_now().isoformat(),
@@ -1047,18 +1194,50 @@ def _report_koncepcja(
         unknowns=list(metadata.get("unknowns") or []),
         capacity=(metadata.get("critique") or {}).get("capacity"),
         plan_png_resource=png_uri,
+        audience=audience,  # type: ignore[arg-type]
+        analysis_result=DEFAULT_STORE.get(variant.analysis_id) if variant.analysis_id else None,
     )
+    return {
+        "model": model,
+        "variant": variant,
+        "aid": aid,
+        "plan_png_uri": png_uri,
+        "plan_png_bytes": len(render.data),
+    }
+
+
+def _report_koncepcja(
+    analysis_id: str | None, variant_id: str | None = None, audience: str = "architect"
+) -> dict[str, Any]:
+    """The ``report_generate(format="koncepcja")`` path — Markdown deliverable.
+
+    Thin over :func:`_assemble_koncepcja` (the shared model assembly) +
+    ``render_model_markdown`` — byte-compatible architect output (Phase 11).
+    """
+    from plot_reports import get_artifact_store, render_model_markdown
+
+    out = _assemble_koncepcja(analysis_id, variant_id, audience)
+    if "model" not in out:
+        return out  # not_found (honest miss, never a fabricated deliverable)
+    model, pii_block = _shared_export_redaction(out["model"], audience)
+    variant = out["variant"]
+    aid = out["aid"]
+    content = render_model_markdown(model)
     md_key = f"analysis/{aid}/koncepcja-{variant.id.replace(':', '-')}.md"
-    md_uri = store.put(md_key, content.encode("utf-8"), "text/markdown")
+    md_uri = get_artifact_store().put(md_key, content.encode("utf-8"), "text/markdown")
     return {
         "analysis_id": aid,
         "format": "koncepcja",
+        "audience": audience,
         "variant_id": variant.id,
         "content": content,
         "artifact_uri": md_uri,
-        "plan_png_uri": png_uri,
-        "plan_png_bytes": len(render.data),
-        "resource_link": report_resource,
+        "plan_png_uri": out["plan_png_uri"],
+        "plan_png_bytes": out["plan_png_bytes"],
+        "resource_link": f"analysis://{aid}/masterplan/{variant.id}/report.md",
+        "report_version": model.report_version,
+        "analysis_snapshot_hash": model.analysis_snapshot_hash,
+        "pii_redaction": pii_block,
         "status": "rendered",
         "note": (
             "Koncepcja zestawiona z zapisanych danych (wariant + brief + audyt "
@@ -1068,9 +1247,290 @@ def _report_koncepcja(
     }
 
 
-def export_layers(analysis_id: str | None, fmt: str) -> dict[str, Any]:
-    """Stub GIS/CAD export (GPKG/DXF; Phase 9/§30)."""
-    return {"analysis_id": analysis_id, "format": fmt, "artifact_uri": None, "note": PHASE7_NOTE}
+def _report_model_format(
+    analysis_id: str | None,
+    fmt: str,
+    variant_id: str | None,
+    audience: str,
+) -> dict[str, Any]:
+    """``report_generate(format="html"|"pdf")`` — rendered from the ONE model (§31).
+
+    An explicit ``variant_id`` selects the koncepcja deliverable; otherwise the
+    screening report of the stored analysis. The HTML/PDF artifact AND the model
+    JSON (the numbers source of truth) land in the ArtifactStore; the result
+    carries links only (NFR-PERF-009). PDF is honest about availability:
+    ``pdf_unavailable`` + reason when the weasyprint system stack is missing.
+    """
+    import json as _json
+
+    from plot_reports import (
+        PdfUnavailableError,
+        build_screening_model,
+        get_artifact_store,
+        render_model_html,
+        render_model_json,
+        render_model_pdf,
+    )
+
+    if variant_id is not None:
+        out = _assemble_koncepcja(analysis_id, variant_id, audience)
+        if "model" not in out:
+            return {**out, "format": fmt}
+        model = out["model"]
+        aid = out["aid"]
+        stem = f"report-koncepcja-{audience}-{out['variant'].id.replace(':', '-')}"
+    else:
+        result = DEFAULT_STORE.get(analysis_id) if analysis_id else None
+        if result is None:
+            return {"analysis_id": analysis_id, "format": fmt, "status": "not_found"}
+        model = build_screening_model(
+            result,
+            audience=audience,  # type: ignore[arg-type]
+            generated_at=_now().isoformat(),
+        )
+        aid = str(analysis_id)
+        stem = f"report-screening-{audience}"
+
+    # Shared-export PII redaction (F-0483): non-architect audiences are the
+    # share channel — owner fields (if any ever appear) never leave the system.
+    model, pii_block = _shared_export_redaction(model, audience)
+
+    store = get_artifact_store()
+    # The model JSON always accompanies html/pdf (§31: the same numbers, the
+    # reproducibility snapshot hash inside).
+    model_json = _json.dumps(
+        render_model_json(model), ensure_ascii=False, indent=2
+    ).encode("utf-8")
+    model_uri = store.put(
+        f"analysis/{aid}/export/{stem}.json", model_json, "application/json"
+    )
+
+    base = {
+        "analysis_id": aid,
+        "format": fmt,
+        "audience": audience,
+        "kind": model.kind,
+        "variant_id": model.variant_id,
+        "report_version": model.report_version,
+        "analysis_snapshot_hash": model.analysis_snapshot_hash,
+        "model_json_uri": model_uri,
+        "model_json_resource": f"analysis://{aid}/export/{stem}.json",
+        "headline_numbers": model.headline,
+        "pii_redaction": pii_block,
+    }
+    if fmt == "html":
+        html_text = render_model_html(model)
+        uri = store.put(
+            f"analysis/{aid}/export/{stem}.html",
+            html_text.encode("utf-8"),
+            "text/html",
+        )
+        return {
+            **base,
+            "artifact_uri": uri,
+            "resource_link": f"analysis://{aid}/export/{stem}.html",
+            "byte_size": len(html_text.encode("utf-8")),
+            "status": "rendered",
+            "note": "HTML deterministyczny, bez zasobów zewnętrznych — z tego samego modelu co md/json (§31).",
+        }
+    try:
+        pdf_bytes = render_model_pdf(model)
+    except PdfUnavailableError as exc:  # pragma: no cover - host-dependent
+        return {
+            **base,
+            "artifact_uri": None,
+            "status": "pdf_unavailable",
+            "note": (
+                f"PDF niedostępny na tym hoście: {exc} — weasyprint wymaga "
+                "systemowych bibliotek pango/cairo. Użyj format='html' "
+                "(ten sam model raportu, te same liczby — §31)."
+            ),
+        }
+    uri = store.put(
+        f"analysis/{aid}/export/{stem}.pdf", pdf_bytes, "application/pdf"
+    )
+    return {
+        **base,
+        "artifact_uri": uri,
+        "resource_link": f"analysis://{aid}/export/{stem}.pdf",
+        "byte_size": len(pdf_bytes),
+        "status": "rendered",
+        "note": "PDF wyrenderowany przez weasyprint z TEGO SAMEGO HTML/modelu (§31).",
+    }
+
+
+#: Formats the export tool produces (Phase 14; F-0393/F-0394 + GeoJSON + IFC).
+_EXPORT_FORMATS = ("geojson", "gpkg", "dxf", "ifc")
+
+_EXPORT_MIME = {
+    "geojson": "application/geo+json",
+    "gpkg": "application/geopackage+sqlite3",
+    "dxf": "image/vnd.dxf",
+    "ifc": "application/x-step",
+}
+
+
+def _variant_violation_geoms(variant: Any) -> list[Any]:
+    """Failing inter-building checks' evidence geometries (PA-NARUSZENIA layer)."""
+    from shapely.geometry import shape
+
+    metadata = variant.metadata if isinstance(variant.metadata, dict) else {}
+    geoms = []
+    for check in metadata.get("inter_building_checks") or []:
+        evidence = check.get("geometry_evidence") or {}
+        if str(check.get("status")) == "fail" and evidence.get("geometry"):
+            geoms.append(shape(evidence["geometry"]))
+    return geoms
+
+
+def _export_context_for_variant(variant: Any) -> Any:
+    """Parcel/envelope context for a variant export — same rules as koncepcja.
+
+    A BOUND variant whose analysis vanished is a hard error (never the sample
+    geometry, §21); unbound (adhoc/test) variants use the drawing context.
+    """
+    metadata = variant.metadata if isinstance(variant.metadata, dict) else {}
+    if bool(metadata.get("analysis_bound")) and variant.analysis_id is not None:
+        context = _analysis_drawing_context(variant.analysis_id)
+        if context is None:
+            raise ValueError(
+                f"Wariant '{variant.id}' jest związany z analizą "
+                f"'{variant.analysis_id}', której nie ma w magazynie analiz albo "
+                "nie ma geometrii działki — eksport nie może użyć geometrii "
+                "przykładowej; ponownie uruchom parcel_analyze."
+            )
+        return context
+    return _drawing_context()
+
+
+def export_layers(
+    analysis_id: str | None, fmt: str, variant_id: str | None = None
+) -> dict[str, Any]:
+    """Real GIS/CAD/BIM export (Phase 14; F-0393/F-0394, §17 formats, §30).
+
+    * ``geojson`` / ``gpkg`` — the masterplan variant layers (renderer-v2 layer
+      assembly) when a variant exists for the analysis (explicit ``variant_id``
+      wins, else the analysis' latest); otherwise the screening layer set
+      (parcel + buildable envelope + constraints) from the stored analysis.
+    * ``dxf`` — the masterplan variant on the documented ``PA-*`` CAD layer
+      convention (``plot_reports.export.dxf``), metres, $INSUNITS=6.
+    * ``ifc`` — the IFC4 massing model (IfcProject/Site/Building/Storey +
+      extruded footprints, EPSG:2180 IfcMapConversion; MASSING ONLY).
+
+    The artifact lands in the ArtifactStore and the result carries
+    ``artifact_uri`` + a ``resource_link`` (``analysis://{id}/export/{file}``) —
+    bytes are NEVER inlined (NFR-PERF-009).
+    """
+    from plot_agent.drawing import DEFAULT_VARIANT_STORE
+    from plot_reports import (
+        collect_analysis_layers,
+        collect_variant_layers,
+        export_geojson,
+        export_gpkg,
+        export_masterplan_dxf,
+        export_masterplan_ifc,
+        get_artifact_store,
+    )
+
+    fmt = fmt.lower()
+    if fmt not in _EXPORT_FORMATS:
+        return {
+            "analysis_id": analysis_id,
+            "format": fmt,
+            "artifact_uri": None,
+            "status": "unsupported_format",
+            "note": f"Obsługiwane formaty eksportu: {', '.join(_EXPORT_FORMATS)}.",
+        }
+
+    aid = analysis_id or ADHOC_ANALYSIS_ID
+    # Variant resolution mirrors the koncepcja report (F1): explicit variant_id
+    # is honoured as-is; otherwise only THIS analysis' latest variant.
+    variant = (
+        DEFAULT_VARIANT_STORE.get(variant_id)
+        if variant_id
+        else DEFAULT_VARIANT_STORE.latest(analysis_id=aid)
+    )
+    result = DEFAULT_STORE.get(analysis_id) if analysis_id else None
+
+    if variant is not None:
+        context = _export_context_for_variant(variant)
+        parcel_geom = context.parcel_geom()
+        envelope_geom = context.envelope_geom()
+        if fmt == "dxf":
+            data = export_masterplan_dxf(
+                variant,
+                parcel_geom,
+                envelope=envelope_geom,
+                violations=_variant_violation_geoms(variant) or None,
+            )
+        elif fmt == "ifc":
+            data = export_masterplan_ifc(variant, parcel_geom)
+        else:
+            layers = collect_variant_layers(variant, parcel_geom, envelope=envelope_geom)
+            data = export_geojson(layers) if fmt == "geojson" else export_gpkg(layers)
+        source: dict[str, Any] = {
+            "variant_id": variant.id,
+            "layers_from": "masterplan_variant",
+        }
+    else:
+        if fmt in ("dxf", "ifc"):
+            return {
+                "analysis_id": analysis_id,
+                "format": fmt,
+                "variant_id": variant_id,
+                "artifact_uri": None,
+                "status": "not_found",
+                "note": (
+                    "Eksport DXF/IFC wymaga zapisanego wariantu masterplanu — "
+                    "najpierw zaproponuj koncepcję przez propose_layout (DSL v2)."
+                ),
+            }
+        if result is None:
+            return {
+                "analysis_id": analysis_id,
+                "format": fmt,
+                "artifact_uri": None,
+                "status": "not_found",
+                "note": "Brak zapisanej analizy o tym id — uruchom parcel_analyze.",
+            }
+        env = result.buildable_envelope
+        layers = collect_analysis_layers(
+            result.parcel.geometry if result.parcel else None,
+            env.geometry if env is not None else None,
+            [
+                {
+                    "constraint_type": c.constraint_type,
+                    "geometry": c.geometry,
+                    "hard": bool(c.machine_summary.get("hard")),
+                }
+                for c in result.constraints
+            ],
+        )
+        data = export_geojson(layers) if fmt == "geojson" else export_gpkg(layers)
+        source = {"variant_id": None, "layers_from": "analysis_screening"}
+
+    suffix = f"-{variant.id.replace(':', '-')}" if variant is not None else ""
+    filename = f"layers{suffix}.{fmt}"
+    uri = get_artifact_store().put(
+        f"analysis/{aid}/export/{filename}", data, _EXPORT_MIME[fmt]
+    )
+    return {
+        "analysis_id": aid,
+        "format": fmt,
+        **source,
+        "artifact_uri": uri,
+        "resource_link": f"analysis://{aid}/export/{filename}",
+        "mime_type": _EXPORT_MIME[fmt],
+        "byte_size": len(data),
+        "status": "exported",
+        "note": (
+            "Plik zapisany w ArtifactStore; bajty przez zasób resource_link, "
+            "nigdy inline (NFR-PERF-009). DXF: warstwy PA-* (konwencja w "
+            "plot_reports.export.dxf), jednostki metry ($INSUNITS=6). IFC: "
+            "model masowy IFC4 (bez ścian/stropów/okien), georeferencja "
+            "EPSG:2180 (IfcMapConversion)."
+        ),
+    }
 
 
 def portfolio_analyze(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1228,18 +1688,109 @@ def cache_warm(scope: str, target_id: str | None) -> dict[str, Any]:
     )
 
 
-def document_ingest(analysis_id: str | None, file_id: str, purpose: str) -> dict[str, Any]:
-    """Stub user-document ingest. Real sandboxed/size-limited ingest in Phase 8 (§16).
+def document_upload(
+    filename: str,
+    content: bytes,
+    *,
+    declared_type: str | None = None,
+    purpose: str,
+    analysis_id: str | None = None,
+) -> dict[str, Any]:
+    """Sandboxed user-document upload (Phase 14B; F-0491–0493, §16).
 
-    ``purpose`` is the explicit-intent parameter required for write tools (§16,
-    NFR-SEC-010); a real implementation also writes an audit-log entry.
+    The §27 shared use-case behind the HTTP ``POST /v1/documents/ingest`` —
+    MCP stdio has no byte-upload channel, so this is NOT a new MCP tool (the
+    tool surface stays frozen); ``document_ingest`` attaches an already-uploaded
+    ``file_id`` to an analysis. Pipeline (``plot_security.ingest_upload``):
+    filename traversal guard → size cap → type allowlist (pdf/html/txt) → PDF
+    page-cap heuristic → AV hook (HONEST ``not_scanned`` — no AV engine here) →
+    quarantine storage in the ArtifactStore → capped text extraction for the
+    untrusted-content parser channel (text is DATA, never instructions). Typed
+    ``UploadRejected`` errors propagate to the API layer (413/415/400). Every
+    successful upload writes an audit entry (NFR-SEC-010).
     """
+    from plot_agent.orchestrator import DEFAULT_ORCHESTRATOR_AUDIT
+    from plot_reports import get_artifact_store
+    from plot_security import DEFAULT_UPLOAD_STORE, ingest_upload
+
+    record = ingest_upload(
+        filename,
+        content,
+        declared_type=declared_type,
+        purpose=purpose,
+        analysis_id=analysis_id,
+        store_bytes=get_artifact_store().put,
+    )
+    DEFAULT_UPLOAD_STORE.put(record)
+    DEFAULT_ORCHESTRATOR_AUDIT.append(
+        {
+            "graph_id": None,
+            "analysis_id": analysis_id,
+            "event": "document_uploaded",
+            "node_id": None,
+            # Metadata only — never the content (it lives in quarantine storage).
+            "detail": record.summary(),
+            "at": _now().isoformat(),
+        }
+    )
     return {
-        "analysis_id": analysis_id,
-        "file_id": file_id,
+        **record.summary(),
+        "ingested": True,
+        "status": "quarantined",
+        "note": (
+            "Plik w kwarantannie ArtifactStore (prefiks quarantine/); treść jest "
+            "DANYMI, nigdy instrukcjami (NFR-SEC-002/003) — parsowanie wyłącznie "
+            "przez planning_parse_document w trybie untrusted-content. "
+            "AV: status uczciwie 'not_scanned' bez silnika AV (F-0492)."
+        ),
+    }
+
+
+def document_ingest(analysis_id: str | None, file_id: str, purpose: str) -> dict[str, Any]:
+    """Attach a sandboxed upload to an analysis (Phase 14B real implementation; §16).
+
+    ``file_id`` must reference an upload that already passed the sandbox
+    (``document_upload`` via the HTTP API). The attach is audited (``purpose``
+    is the §16/NFR-SEC-010 explicit intent). An unknown ``file_id`` is an honest
+    miss explaining the upload channel — MCP stdio carries no file bytes.
+    """
+    from plot_agent.orchestrator import DEFAULT_ORCHESTRATOR_AUDIT
+    from plot_security import DEFAULT_UPLOAD_STORE
+
+    record = DEFAULT_UPLOAD_STORE.attach(file_id, analysis_id, purpose)
+    if record is None:
+        return {
+            "analysis_id": analysis_id,
+            "file_id": file_id,
+            "purpose": purpose,
+            "ingested": False,
+            "status": "file_not_found",
+            "note": (
+                "Brak uploadu o tym file_id w sandboxie — pliki wgrywa się przez "
+                "HTTP API (POST /v1/documents/ingest, sandbox F-0491–0493); "
+                "kanał MCP stdio nie przenosi bajtów plików."
+            ),
+        }
+    DEFAULT_ORCHESTRATOR_AUDIT.append(
+        {
+            "graph_id": None,
+            "analysis_id": analysis_id,
+            "event": "document_attached",
+            "node_id": None,
+            "detail": {"file_id": file_id, "purpose": purpose, "filename": record.filename},
+            "at": _now().isoformat(),
+        }
+    )
+    return {
+        **record.summary(),
         "purpose": purpose,
-        "ingested": False,
-        "note": "Untrusted content; sandboxed scan + size/type limits in Phase 8 (§16).",
+        "ingested": True,
+        "status": "attached",
+        "audit_logged": True,
+        "note": (
+            "Upload powiązany z analizą; treść w kwarantannie, parsowanie przez "
+            "planning_parse_document(file_id=...) w trybie untrusted-content (§16)."
+        ),
     }
 
 

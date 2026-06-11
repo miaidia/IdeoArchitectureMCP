@@ -4,6 +4,8 @@
   :class:`~plot_domain.AnalysisResult`. Headline numbers (decision, parcel area,
   buildable area, counts) are derived from the SAME result object as :func:`render_json`,
   so MD and JSON agree by construction (§7.3 / NFR-AUD: "numbers in MD must match JSON").
+  Since Phase 14 it renders through the unified :class:`~plot_reports.model.ReportModel`
+  (§31 DoD) — the same model the HTML/PDF renderers use.
 * :func:`render_json` — the AnalysisResult as a JSON-mode dict (the §10.7 contract).
 * :func:`render_envelope_map` — a deterministic buildable-envelope PNG via the Phase 3
   :func:`render_map` (parcel + constraints + no-build + envelope layers), so the model can
@@ -25,19 +27,6 @@ from plot_reports.render import Layer, LayerRole, RenderResult, render_map
 def render_json(result: AnalysisResult) -> dict[str, Any]:
     """Return the AnalysisResult as a JSON-serialisable dict (the §10.7 contract)."""
     return result.model_dump(mode="json")
-
-
-def _fmt_m2(value: float | None) -> str:
-    return "brak danych" if value is None else f"{value:,.0f} m²"
-
-
-def _decision_label(decision: str) -> str:
-    return {
-        "OK": "OK — brak istotnych przeszkód na poziomie screeningu",
-        "OK_WITH_RISKS": "OK_WITH_RISKS — możliwe do rozważenia, z ryzykami",
-        "NEEDS_MANUAL_REVIEW": "NEEDS_MANUAL_REVIEW — wymaga weryfikacji eksperckiej",
-        "LIKELY_BLOCKED": "LIKELY_BLOCKED — prawdopodobnie zablokowane",
-    }.get(decision, decision)
 
 
 def headline_numbers(result: AnalysisResult) -> dict[str, Any]:
@@ -67,160 +56,17 @@ def headline_numbers(result: AnalysisResult) -> dict[str, Any]:
 
 
 def render_markdown(result: AnalysisResult) -> str:
-    """Render the §22 Markdown report from ``result`` (numbers == :func:`render_json`)."""
-    h = headline_numbers(result)
-    parcel_id = (
-        (result.parcel.external_id or result.parcel.teryt or result.parcel.id)
-        if result.parcel
-        else result.analysis_id
-    )
-    metrics = result.planning.get("_geometry_metrics", {}) if isinstance(result.planning, dict) else {}
+    """Render the §22 Markdown report from ``result`` (numbers == :func:`render_json`).
 
-    lines: list[str] = []
-    lines.append(f"# Analiza działki: {parcel_id}")
-    lines.append("")
-    lines.append("## Decyzja screeningowa")
-    lines.append(_decision_label(h["decision"]))
-    lines.append(f"(status analizy: {h['status']})")
-    lines.append("")
+    Phase 14 (§31 DoD): thin wrapper over the unified report model — builds
+    :class:`~plot_reports.model.ReportModel` via ``build_screening_model`` and
+    renders via ``render_model_markdown`` (byte-compatible output; the SAME
+    model feeds the HTML/JSON/PDF renderers in :mod:`plot_reports.formats`).
+    """
+    from plot_reports.formats import render_model_markdown
+    from plot_reports.model import build_screening_model
 
-    # Najważniejsze wnioski
-    lines.append("## Najważniejsze wnioski")
-    lines.append(
-        f"- Powierzchnia działki: {_fmt_m2(h['parcel_area_m2'])}; "
-        f"obszar zabudowy (buildable envelope): {_fmt_m2(h['buildable_area_m2'])}"
-        + (f" ({h['buildable_percent']:.1f}% działki)" if h["buildable_percent"] is not None else "")
-    )
-    lines.append(f"- Wykryte ograniczenia: {h['constraint_count']}; czerwone flagi: {h['risk_count']}.")
-    lines.append(f"- Pozycje niepewne (unknowns): {h['unknown_count']}.")
-    lines.append("")
-
-    # Czerwone flagi
-    lines.append("## Czerwone flagi")
-    if result.risks:
-        for r in result.risks:
-            lines.append(
-                f"- [{r.severity.value}/{r.risk_type.value}] {r.summary} "
-                f"(status: {r.status.value}, pewność: {r.confidence.value}"
-                + (f", źródło: {r.source_id}" if r.source_id else ", źródło: no_source")
-                + ")"
-            )
-    else:
-        lines.append("- Brak czerwonych flag na poziomie screeningu.")
-    lines.append("")
-
-    # Co można rozważać projektowo
-    lines.append("## Co można rozważać projektowo")
-    env = result.buildable_envelope
-    if env and (env.area_m2 or 0.0) > 0.0:
-        lines.append(
-            f"- Realny obszar pod zabudowę: {_fmt_m2(env.area_m2)} "
-            f"(pewność envelope: {env.confidence:.2f})."
-        )
-        if env.largest_inscribed_rectangle is not None:
-            lines.append("- Wyznaczono największy prostokąt wpisany (orientacyjny obrys budynku).")
-    else:
-        lines.append("- Po odsunięciach i strefach wyłączonych brak istotnego obszaru pod zabudowę.")
-    lines.append("")
-
-    # Co wymaga potwierdzenia
-    lines.append("## Co wymaga potwierdzenia")
-    if result.unknowns:
-        for u in result.unknowns:
-            lines.append(f"- [{u.severity.value}] {u.topic} — powód: {u.reason}.")
-    else:
-        lines.append("- Brak otwartych pozycji niepewnych.")
-    lines.append("")
-
-    # Parametry działki
-    lines.append("## Parametry działki")
-    lines.append(f"- powierzchnia: {_fmt_m2(h['parcel_area_m2'])}")
-    if metrics:
-        lines.append(f"- obwód: {metrics.get('perimeter_m', 'brak danych')} m")
-        lines.append(
-            f"- kształt: zwartość {metrics.get('compactness', '?')}, "
-            f"nieregularność {metrics.get('irregularity', '?')}"
-        )
-        lines.append(f"- oś główna: {metrics.get('main_axis_length_m', '?')} m")
-    lines.append("")
-
-    # Planowanie
-    lines.append("## Planowanie")
-    planning = result.planning if isinstance(result.planning, dict) else {}
-    lines.append(f"- MPZP/POG/WZ: {planning.get('mpzp_pog_wz', 'brak danych')}")
-    lines.append(f"- pokrycie planistyczne: {planning.get('coverage_status', 'brak danych')}")
-    lines.append(f"- gmina: {planning.get('municipality') or 'brak danych'}")
-    lines.append("")
-
-    # Buildable envelope
-    lines.append("## Buildable envelope")
-    lines.append(f"- powierzchnia potencjalna: {_fmt_m2(h['buildable_area_m2'])}")
-    main_constraints = ", ".join(
-        sorted({c.constraint_type for c in result.constraints})
-    ) or "brak"
-    lines.append(f"- główne ograniczenia: {main_constraints}")
-    if env and isinstance(env.metadata, dict):
-        for tr in env.metadata.get("removed_by", []):
-            lines.append(
-                f"  - {tr.get('label')}: −{tr.get('removed_m2'):,.0f} m² "
-                f"({tr.get('removed_percent')}%)"
-            )
-    lines.append("")
-
-    # Media i dojazd
-    lines.append("## Media i dojazd")
-    layer_status = planning.get("_risk_layer_status", {}) if isinstance(planning, dict) else {}
-    lines.append(f"- media (uzbrojenie): {layer_status.get('utilities', 'nie sprawdzono')}")
-    lines.append(f"- dojazd / drogi: {layer_status.get('roads', 'nie sprawdzono')}")
-    lines.append("")
-
-    # Środowisko, wody, geologia, zabytki
-    lines.append("## Środowisko, wody, geologia, zabytki")
-    lines.append(f"- powódź: {layer_status.get('flood', 'nie sprawdzono')}")
-    lines.append(f"- ochrona przyrody: {layer_status.get('protected', 'nie sprawdzono')}")
-    lines.append(f"- osuwiska / geologia: {layer_status.get('landslide', 'nie sprawdzono')}")
-    lines.append(f"- zabytki: {layer_status.get('heritage', 'nie sprawdzono')}")
-    lines.append(f"- cieki wodne: {layer_status.get('watercourses', 'nie sprawdzono')}")
-    lines.append(f"- las: {layer_status.get('forest', 'nie sprawdzono')}")
-    lines.append("")
-
-    # Chłonność
-    lines.append("## Chłonność")
-    lines.append("- wariant konserwatywny: nie obliczono (chłonność wchodzi w Fazie 9)")
-    lines.append("- wariant bazowy: nie obliczono (Faza 9)")
-    lines.append("- wariant optymistyczny: nie obliczono (Faza 9)")
-    lines.append("")
-
-    # Następne kroki
-    lines.append("## Następne kroki")
-    if result.next_actions:
-        for a in result.next_actions:
-            who = f" → {a.addressed_to}" if a.addressed_to else ""
-            lines.append(f"- [{a.priority.value}] {a.title}: {a.detail}{who}")
-    else:
-        lines.append("- Brak rekomendacji.")
-    lines.append("")
-
-    # Źródła i confidence
-    lines.append("## Źródła i confidence")
-    sources = planning.get("_sources", []) if isinstance(planning, dict) else []
-    if sources:
-        for s in sources:
-            lines.append(
-                f"- {s.get('publisher')} ({s.get('source_id')}): "
-                f"legal_status={s.get('legal_status')}, "
-                f"pobrano={s.get('retrieved_at')}, confidence={s.get('confidence')}"
-            )
-    else:
-        lines.append("- Brak źródeł (no_source) — wynik częściowy.")
-    lines.append(f"- Liczba pozycji evidence: {h['evidence_count']}.")
-    lines.append("")
-    lines.append(
-        "_Wynik jest narzędziem priorytetyzującym, nie decyzją prawną. "
-        "Każda teza ma źródło albo oznaczenie braku źródła (no_source)._"
-    )
-
-    return "\n".join(lines) + "\n"
+    return render_model_markdown(build_screening_model(result))
 
 
 def render_envelope_map(

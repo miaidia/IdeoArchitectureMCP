@@ -78,6 +78,14 @@ ignore = [
     "UP046",  # `Generic[T]` (vs PEP 695 syntax) is required for Pydantic v2 generic models
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# FastAPI's dependency-injection idiom IS `Depends(...)` in argument defaults.
+"apps/api/plot_api/app.py" = ["B008"]
+# pytest fixture-import pattern: test parameters intentionally shadow the
+# imported fixture name (`api`).
+"tests/test_api_http.py" = ["F811"]
+"tests/test_api_security.py" = ["F811"]
+
 [tool.mypy]
 python_version = "3.12"
 warn_unused_configs = true
@@ -131,6 +139,9 @@ module = [
     "py_straight_skeleton.*",
     # Phase 12 terrain module (site_context.terrain) — rasterio ships no py.typed.
     "rasterio.*",
+    # Phase 14 exports/PDF — ezdxf ships py.typed but ifcopenshell/weasyprint do not.
+    "ifcopenshell.*",
+    "weasyprint.*",
 ]
 ignore_missing_imports = true
 
@@ -143,4 +154,5 @@ testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
     "live: opt-in smoke tests that hit real external services; skipped by default (Phase 6 §6.4).",
+    "perf: NFR-PERF benchmark/budget tests (Phase 14B); fast enough to run by default.",
 ]

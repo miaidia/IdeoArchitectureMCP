@@ -20,6 +20,16 @@ dependencies = [
     "numpy>=1.26",
     # Headless web-map screenshots (Phase 0.4 "Screenshots (web map)" / Phase 3 §3.1.3).
     "playwright>=1.44",
+    # Phase 14 exports: DXF CAD layers (v2 plan §0v2.3 — ezdxf 1.4.4, MIT).
+    "ezdxf>=1.4.4",
+    # Phase 14 IFC massing export (§0v2.3 names 0.8.5, but its manylinux_2_31
+    # wheel links GLIBC_2.32 and fails to import on this WSL2 host (glibc 2.31);
+    # 0.8.4.post1 imports + validates — pinned below 0.8.5, same 0.8.x API).
+    "ifcopenshell>=0.8.4,<0.8.5",
+    # Phase 14 PDF from the unified report model (§31). weasyprint needs SYSTEM
+    # pango/cairo; the import is guarded (plot_reports.formats.pdf_available) —
+    # hosts without them get an honest `pdf_unavailable`, never a fake PDF.
+    "weasyprint>=69.0",
     # Workspace deps. plot-reports must NOT import plot_connectors / plot_rules (§3.4).
     "plot-domain",
     "plot-shared",

@@ -13,10 +13,14 @@ dependencies = [
     # Phase 8: expert-override hook reuses the audited Override model (§26.1, NFR-AUD-003).
     # Only plot_domain.models is imported — never plot_domain.db (domain package rule).
     "plot-domain",
+    # Phase 14B (F-0509): registry stat-fingerprint cache is gated by the
+    # dev_hot_reload setting — dev stays fresh-per-call (Phase 2 hot-reload).
+    "plot-shared",
 ]
 
 [tool.uv.sources]
 plot-domain = { workspace = true }
+plot-shared = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

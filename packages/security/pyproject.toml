@@ -1,9 +1,15 @@
-# plot-security — workspace member. Stub package (no runtime code yet); deferred to a later phase.
+# plot-security — upload sandbox + file-safety policy (Phase 14B; F-0491–0493, §16).
 [project]
 name = "plot-security"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    # Settings (size/type/page caps come from env-only config; F-0477).
+    "plot-shared",
+]
+
+[tool.uv.sources]
+plot-shared = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

@@ -23,6 +23,8 @@ carries an EvidenceItem (source_id + retrieved_at) or an explicit ``no_source`` 
 
 from __future__ import annotations
 
+import asyncio
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -159,6 +161,9 @@ class ScreeningInternals:
     layer_status: dict[str, str] = field(default_factory=dict)
     envelope_geom: BaseGeometry | None = None
     any_source_failed: bool = False
+    # Phase 14B (F-0517/0525): when the analysis started (time.monotonic()) so the
+    # full-DD site-source fetches share the SAME total deadline budget.
+    started_monotonic: float = 0.0
 
     def layer_geoms(self, kind: RiskKind) -> list[BaseGeometry] | None:
         """Geometries for a theme; ``None`` when the source was UNAVAILABLE (§21)."""
@@ -219,6 +224,7 @@ async def run_screening_with_internals(
     result is byte-identical to :func:`run_quick_screening`.
     """
     analysis_id = analysis_id or str(uuid.uuid4())
+    started_monotonic = time.monotonic()  # analysis-level deadline anchor (F-0525)
     registry = ruleset_registry or load_rulesets(ruleset_dir)
     evidence: list[EvidenceItem] = []
     sources: list[SourceRecord] = []
@@ -241,7 +247,11 @@ async def run_screening_with_internals(
         # useful (NFR-REL-010) — the parcel resolution unknown is recorded.
         return (
             _no_parcel_result(analysis_id, parcel_obj, evidence, sources),
-            ScreeningInternals(registry=registry, any_source_failed=any_source_failed),
+            ScreeningInternals(
+                registry=registry,
+                any_source_failed=any_source_failed,
+                started_monotonic=started_monotonic,
+            ),
         )
 
     # ----------------------------------------------------------------- #
@@ -263,8 +273,14 @@ async def run_screening_with_internals(
     layer_status: dict[str, str] = {}
     precision_by_source: dict[str, GeometryPrecision] = {}
 
-    for kind in MVP_RISK_THEMES:
-        fetch = await connectors.risk_layers.fetch(kind, bbox)
+    # Phase 14B (F-0510/0511): the 8 theme fetches run CONCURRENTLY (the connector
+    # layer is async) under a semaphore cap, unless a backpressure delay is
+    # configured — then sequential with the delay (NFR-PERF-014). The analysis
+    # deadline (F-0517/0525) degrades themes that cannot finish in budget to
+    # source_unavailable (explicit unknowns), never silently dropping them.
+    fetches = await _fetch_risk_layers(connectors, bbox, started_monotonic=started_monotonic)
+    for fetch in fetches:
+        kind = fetch.kind
         layer_status[kind.value] = fetch.status.value
         if fetch.status is ResultStatus.SOURCE_UNAVAILABLE:
             any_source_failed = True
@@ -380,8 +396,84 @@ async def run_screening_with_internals(
         layer_status=layer_status,
         envelope_geom=shape(envelope.geometry) if envelope.geometry else None,
         any_source_failed=any_source_failed,
+        started_monotonic=started_monotonic,
     )
     return result, internals
+
+
+# --------------------------------------------------------------------------- #
+# Phase 14B: parallel theme fetches + analysis-level deadline (F-0510/0517/0525)
+# --------------------------------------------------------------------------- #
+DEADLINE_DETAIL = "analysis_deadline_exceeded (F-0517/0525)"
+
+
+def _deadline_fetch(kind: RiskKind) -> Any:
+    """Synthetic source_unavailable fetch for a theme cut off by the deadline."""
+    from plot_agent.analysis.connectors import RiskLayerFetch
+
+    return RiskLayerFetch(
+        kind=kind,
+        status=ResultStatus.SOURCE_UNAVAILABLE,
+        result=None,
+        source_id="analysis_deadline",
+        detail=DEADLINE_DETAIL,
+    )
+
+
+def deadline_remaining_s(started_monotonic: float) -> float | None:
+    """Seconds left in the analysis deadline budget; ``None`` when disabled."""
+    from plot_shared import get_settings
+
+    deadline = get_settings().analysis_deadline_s
+    if not deadline:
+        return None
+    return deadline - (time.monotonic() - started_monotonic)
+
+
+async def _fetch_risk_layers(
+    connectors: Connectors, bbox: BBox, *, started_monotonic: float
+) -> list[Any]:
+    """Fetch all MVP themes; concurrent by default, sequential under backpressure.
+
+    Order of the returned fetches always matches :data:`MVP_RISK_THEMES`
+    (``asyncio.gather`` preserves order), so downstream processing is
+    deterministic regardless of completion order.
+    """
+    from plot_shared import get_settings
+
+    settings = get_settings()
+
+    if settings.backpressure_delay_s > 0:
+        # Sequential with the configured delay — never a parallel hammer on
+        # public services when a deployment throttles egress (NFR-PERF-014).
+        out: list[Any] = []
+        for i, kind in enumerate(MVP_RISK_THEMES):
+            remaining = deadline_remaining_s(started_monotonic)
+            if remaining is not None and remaining <= 0:
+                out.append(_deadline_fetch(kind))
+                continue
+            if i:
+                await asyncio.sleep(settings.backpressure_delay_s)
+            out.append(await connectors.risk_layers.fetch(kind, bbox))
+        return out
+
+    semaphore = asyncio.Semaphore(max(1, settings.parallel_fetch_limit))
+
+    async def _one(kind: RiskKind) -> Any:
+        async with semaphore:
+            remaining = deadline_remaining_s(started_monotonic)
+            if remaining is None:
+                return await connectors.risk_layers.fetch(kind, bbox)
+            if remaining <= 0:
+                return _deadline_fetch(kind)
+            try:
+                return await asyncio.wait_for(
+                    connectors.risk_layers.fetch(kind, bbox), timeout=remaining
+                )
+            except TimeoutError:
+                return _deadline_fetch(kind)
+
+    return list(await asyncio.gather(*(_one(kind) for kind in MVP_RISK_THEMES)))
 
 
 # --------------------------------------------------------------------------- #
