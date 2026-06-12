@@ -435,4 +435,35 @@ def create_app(
         )
         return out
 
+    # ------------------------------------------------------------------ #
+    # OpenAPI: declare the X-API-Key scheme honestly (Phase 16, F-0558).
+    # Enforcement lives in ApiKeyAuth (above); this only DOCUMENTS it so the
+    # served schema matches reality: every /v1 operation requires the key,
+    # healthz/metrics are the explicit public exceptions.
+    # ------------------------------------------------------------------ #
+    def _openapi_with_security() -> dict[str, Any]:
+        if app.openapi_schema:
+            return app.openapi_schema
+        from fastapi.openapi.utils import get_openapi
+        from plot_shared import API_KEY_HEADER
+
+        schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            description=app.description,
+            routes=app.routes,
+        )
+        schema.setdefault("components", {}).setdefault("securitySchemes", {})[
+            "ApiKeyHeader"
+        ] = {"type": "apiKey", "in": "header", "name": API_KEY_HEADER}
+        schema["security"] = [{"ApiKeyHeader": []}]
+        for public in ("/healthz", "/metrics"):
+            for operation in schema["paths"].get(public, {}).values():
+                if isinstance(operation, dict):
+                    operation["security"] = []  # documented public endpoints
+        app.openapi_schema = schema
+        return schema
+
+    app.openapi = _openapi_with_security  # type: ignore[method-assign]
+
     return app

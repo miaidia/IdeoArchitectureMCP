@@ -386,6 +386,13 @@ def _md_kon_compliance(m: ReportModel, L: list[str], n: int) -> None:
         L.append(f"- reguły naruszone: {summary['failing_rule_ids']}")
     else:
         L.append("- brak naruszonych reguł twardych (zero hard violations)")
+    if summary.get("manual_review_rule_ids"):
+        # §25.1 threshold policy (Phase 16): low-confidence outcomes need a human.
+        L.append(
+            "- wyniki o confidence < "
+            f"{summary.get('manual_review_threshold', 0.6)} — wymagają "
+            f"potwierdzenia (manual review, §25.1): {summary['manual_review_rule_ids']}"
+        )
     L.append(
         "- pełny ślad reguł (trace + geometria dowodowa): zasób "
         f"`analysis://{m.analysis_id}/masterplan/{m.variant_id}/metrics.json`"
@@ -672,9 +679,18 @@ def _html_kon_compliance(m: ReportModel, n: int) -> list[str]:
             if s["failing_rule_ids"]
             else "brak naruszonych reguł twardych (zero hard violations)"
         ),
-        "pełny ślad reguł (trace + geometria dowodowa): zasób "
-        f"<code>{_esc(m.metrics_resource or '')}</code>",
     ]
+    if s.get("manual_review_rule_ids"):
+        # §25.1 threshold policy (Phase 16): low-confidence outcomes need a human.
+        items.append(
+            f"wyniki o confidence &lt; {s.get('manual_review_threshold', 0.6)} — "
+            "wymagają potwierdzenia (manual review, §25.1): "
+            f"{_esc(s['manual_review_rule_ids'])}"
+        )
+    items.append(
+        "pełny ślad reguł (trace + geometria dowodowa): zasób "
+        f"<code>{_esc(m.metrics_resource or '')}</code>"
+    )
     return [f"<h2>{n}. Zgodność WT/ppoż (walidatory między-budynkowe)</h2>", *_html_list(items)]
 
 

@@ -362,6 +362,55 @@ def _confidence(
     return max(0.05, min(1.0, base))
 
 
+def _confidence_components(
+    rule: Rule, status: RuleStatus, from_unknown: bool, assumed: dict[str, Any]
+) -> dict[str, Any]:
+    """The §25.1 component decomposition of a rule outcome (Phase 16 calibration).
+
+    The engine can attribute two components from what it actually knows:
+
+    * ``semantic_precision`` — how unambiguous the evaluated inputs were:
+      declared/measured inputs score high; every ``input_defaults`` assumption
+      that filled a gap (e.g. the conservative ``windowed_walls`` default —
+      declared, not geometry-derived) lowers it stepwise;
+    * ``ruleset_certainty`` — how unambiguously the RULE decided: a decided
+      pass/fail keeps the policy's ``decided`` level; an outcome derived from an
+      unknown (mode-promoted warning/fail) or a flat unknown drops to the
+      policy's respective level (validator heuristics document themselves the
+      same way through their ``confidence_policy``).
+
+    The flat :attr:`RuleCheck.confidence` is UNCHANGED (it remains the audited
+    legacy scalar); this block explains it in §25.1 terms and carries the
+    composite the calibration model assigns to the same inputs.
+    """
+    from plot_domain.confidence import confidence_components as _compose
+
+    policy = rule.raw.get("confidence_policy") or {}
+
+    def _level(key: str, default: float) -> float:
+        # Defense-in-depth clamp (M1): the ruleset schema bounds
+        # confidence_policy to [0, 1] at load time, but rule.raw access paths
+        # (in-memory rules, loader bypass) can still carry out-of-range values —
+        # clamp exactly like the legacy _confidence so evaluate() never raises.
+        return max(0.05, min(1.0, float(policy.get(key, default))))
+
+    decided = _level("decided", 0.9)
+    unknown = _level("unknown", 0.2)
+    conservative_unknown = _level("conservative_unknown", 0.4)
+
+    semantic = max(0.5, 0.95 - 0.15 * len(assumed)) if assumed else 0.95
+    if status is RuleStatus.UNKNOWN:
+        certainty = unknown
+    elif from_unknown:
+        certainty = conservative_unknown
+    else:
+        certainty = decided
+    composite = _compose(
+        semantic_precision=round(semantic, 4), ruleset_certainty=certainty
+    )
+    return composite.to_dict()
+
+
 def evaluate(
     rule: Rule,
     inputs: dict[str, Any],
@@ -472,6 +521,12 @@ def evaluate(
         # optimistic mode: stays unknown.
 
     confidence = _confidence(rule, status, from_unknown, assumed)
+    # §25.1 decomposition (Phase 16): recorded in the trace next to the flat
+    # value — geometry-derived vs declared (assumed) inputs lower
+    # semantic_precision; unknown-derived outcomes lower ruleset_certainty.
+    trace["confidence_components"] = _confidence_components(
+        rule, status, from_unknown, assumed
+    )
 
     # Expert override hook (F-0137): applied last, fully audited (NFR-AUD-003).
     if override is not None and override_targets_rule(override.target_id, rule.id):
@@ -496,6 +551,10 @@ def evaluate(
             f"(reason: {override.reason}) [audited override]"
         )
         confidence = float(override.after_json.get("confidence", 0.95))
+        # m4: the components block computed above describes the PRE-override
+        # evaluation — mark it superseded so the flat (override-supplied)
+        # confidence and the composite cannot be read as silently disagreeing.
+        trace["confidence_components"]["superseded_by_override"] = True
 
     return RuleCheck(
         rule_id=rule.id,

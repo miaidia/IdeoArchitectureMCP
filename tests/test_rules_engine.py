@@ -350,6 +350,25 @@ def test_confidence_ranges() -> None:
     assert decided.confidence > conservative.confidence > unknown.confidence
 
 
+def test_confidence_policy_out_of_range_is_clamped_not_raised() -> None:
+    """M1 regression: an out-of-range ``confidence_policy`` value reached through
+    ``rule.raw`` (the schema rejects it at load time, but raw access paths and
+    in-memory rules bypass the loader) is CLAMPED into [0.05, 1.0] like the
+    legacy ``_confidence`` — ``evaluate`` never raises (engine guarantee)."""
+    rule = make_rule(
+        confidence_policy={"decided": 1.2, "unknown": -0.3}, **SIMPLE
+    )
+    decided = evaluate(rule, {"distance_m": 5.0})  # must not raise
+    assert decided.confidence == 1.0  # legacy scalar clamp
+    cc = decided.trace["confidence_components"]
+    assert cc["components"]["ruleset_certainty"] == 1.0  # 1.2 clamped down
+
+    unknown = evaluate(rule, {}, mode="optimistic")  # must not raise
+    assert unknown.confidence == 0.05  # legacy scalar clamp (floor)
+    cc_unknown = unknown.trace["confidence_components"]
+    assert cc_unknown["components"]["ruleset_certainty"] == 0.05  # -0.3 clamped up
+
+
 # --------------------------------------------------------------------------- #
 # Expert override hook (F-0137, NFR-AUD-003)
 # --------------------------------------------------------------------------- #
@@ -372,6 +391,33 @@ def test_override_applies_with_audit_note() -> None:
     assert audit["original_status"] == "fail"
     assert check.confidence == 0.8
     assert "overridden" in check.message
+
+
+def test_override_marks_confidence_components_superseded() -> None:
+    """m4 regression: after an expert override the flat confidence comes from the
+    override (e.g. 0.95) while the trace's confidence_components still describe
+    the PRE-override evaluation — the components block must carry an explicit
+    ``superseded_by_override`` marker so the disagreement is self-explaining."""
+    rule = make_rule(**SIMPLE)
+    override = Override(
+        id="ovr-3",
+        user_id="ekspert@example.pl",
+        target_type="rule_check",
+        target_id="TEST-RULE-001",
+        before_json={"status": "fail"},
+        after_json={"status": "pass", "confidence": 0.95},
+        reason="Pomiar geodezyjny potwierdza zgodnosc",
+    )
+    overridden = evaluate(rule, {}, mode="optimistic", override=override)
+    assert overridden.status is RuleStatus.PASS
+    assert overridden.confidence == 0.95
+    cc = overridden.trace["confidence_components"]
+    assert cc["superseded_by_override"] is True
+    # The components still document the pre-override evaluation (audit trail).
+    assert cc["value"] < overridden.confidence
+
+    plain = evaluate(rule, {}, mode="optimistic")
+    assert "superseded_by_override" not in plain.trace["confidence_components"]
 
 
 def test_override_for_other_rule_is_ignored() -> None:
@@ -428,6 +474,12 @@ def test_valid_document_loads(tmp_path: Path) -> None:
         {"select": {"t": [{"value": 1.0}]}},  # bracket without `when`
         {"source_reference": None},  # §12.1: no unsourced rules
         {"thresholds": {"a": "four"}},  # non-numeric threshold
+        # M1: confidence_policy levels are probabilities — bounded to [0, 1] at
+        # load time (a YAML typo like decided: 1.2 lands in registry.errors
+        # instead of corrupting evaluations; the engine clamp is defense-in-depth
+        # for raw access paths).
+        {"confidence_policy": {"decided": 1.2}},
+        {"confidence_policy": {"unknown": -0.1}},
     ],
 )
 def test_invalid_document_is_skipped_and_reported(

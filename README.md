@@ -7,6 +7,29 @@ SQLAlchemy + GeoAlchemy2 DB layer with Alembic, infra compose, and CI.
 See `AGENTS/IMPLEMENTATION_PLAN.md` for the full phased plan and
 `AGENTS/base_assumptions.md` for the authoritative specification.
 
+## Tests, calibration & acceptance (Phase 16)
+
+- **Masterplan golden corpus** — `tests/corpus/`: five plot classes (riverside
+  ~5 ha, narrow śródmiejska infill, 1 ha MN, corner mixed-use, 2-parcel
+  assembly), each with synthetic MPZP indicators, expected capacity RANGES, a
+  hand-written compliant masterplan and a committed golden render
+  (`UPDATE_GOLDEN=1 uv run pytest tests/corpus` regenerates the references).
+- **Confidence calibration (§25.1)** — `plot_domain.confidence` composes the
+  eight spec components into a banded composite (high/moderate/low/hint);
+  calibrated against the hand-labeled `tests/calibration/manual_review_set.json`
+  (≥90% band accuracy enforced). Envelope, rule-engine traces and parser
+  indicators all emit the decomposition; reports flag `confidence < 0.60`
+  outcomes for manual review.
+- **Acceptance demo** — `tests/test_acceptance_v2.py::test_full_version_gate`
+  replays the canonical architect session (full DD → planning parse → capacity
+  → brief → two masterplan iterations → koncepcja report in every format →
+  DXF/IFC/GeoJSON export → PZT draft → ruleset edit without code change →
+  reproducibility + audit) over the in-memory MCP server, zero network.
+- **Ops docs** — `docs/RUNBOOK.md` (start/stop/health/state caveats),
+  `docs/RULESET_UPDATE.md` (the no-code-change ruleset workflow; regression
+  runner fails on rules without golden vectors), `infra/k8s/` (minimal honest
+  manifests, structurally tested).
+
 ## Layout
 
 - `apps/{api,mcp-server,worker,web}` — process entry points.

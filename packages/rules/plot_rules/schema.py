@@ -167,7 +167,11 @@ RULESET_SCHEMA: dict[str, Any] = {
         "input_defaults": {"type": "object"},
         "confidence_policy": {
             "type": "object",
-            "additionalProperties": {"type": "number"},
+            # M1: policy levels are probabilities — a YAML typo (e.g. 1.2) lands
+            # in registry.errors at load time instead of corrupting evaluations
+            # (the engine additionally clamps as defense-in-depth for rule.raw
+            # access paths that bypass the loader).
+            "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1},
         },
         # NFR-AUD-005: literal fragment of the legal text + how it was verified.
         "source_quote": {"type": "string"},

@@ -24,6 +24,7 @@ from plot_domain import (
     GeometryPrecision,
     LegalStatus,
     NoBuildZone,
+    confidence_components,
 )
 from shapely.geometry import mapping, shape
 from shapely.geometry.base import BaseGeometry
@@ -53,6 +54,40 @@ def _geom(obj: NoBuildZone | Constraint) -> BaseGeometry | None:
     return None if g.is_empty else g
 
 
+def envelope_confidence_components(
+    constraints: list[Constraint],
+    precision_by_source: dict[str, GeometryPrecision] | None = None,
+) -> dict[str, float] | None:
+    """The §25.1 component decomposition behind :func:`envelope_confidence`.
+
+    Phase 16 (§25 calibration): the same min-per-constraint inputs the legacy
+    scalar blends are emitted as named components so reports/audits can show
+    WHY the envelope confidence is what it is:
+
+    * ``source_authority``   — min legal-status weight of the shaping constraints;
+    * ``geometry_precision`` — min geometry-precision weight of their sources;
+    * ``semantic_precision`` — min per-constraint confidence (content ambiguity).
+
+    ``None`` when there are no constraints (no measurable components — the
+    scalar falls back to its documented moderate 0.6).
+    """
+    precision_by_source = precision_by_source or {}
+    if not constraints:
+        return None
+    return {
+        "source_authority": min(
+            _LEGAL_WEIGHT.get(c.source_legal_status, 0.4) for c in constraints
+        ),
+        "geometry_precision": min(
+            _PRECISION_WEIGHT.get(
+                precision_by_source.get(c.source_id, GeometryPrecision.UNKNOWN), 0.45
+            )
+            for c in constraints
+        ),
+        "semantic_precision": min(c.confidence for c in constraints),
+    }
+
+
 def envelope_confidence(
     constraints: list[Constraint],
     precision_by_source: dict[str, GeometryPrecision] | None = None,
@@ -65,16 +100,12 @@ def envelope_confidence(
     the parcel geometry alone is known, but the absence of constraint data is itself an
     uncertainty (it may simply be that sources were not checked / unavailable).
     """
-    precision_by_source = precision_by_source or {}
-    if not constraints:
+    parts = envelope_confidence_components(constraints, precision_by_source)
+    if parts is None:
         return 0.6
-
-    legal_w = min(_LEGAL_WEIGHT.get(c.source_legal_status, 0.4) for c in constraints)
-    prec_w = min(
-        _PRECISION_WEIGHT.get(precision_by_source.get(c.source_id, GeometryPrecision.UNKNOWN), 0.45)
-        for c in constraints
-    )
-    conf_w = min(c.confidence for c in constraints)
+    legal_w = parts["source_authority"]
+    prec_w = parts["geometry_precision"]
+    conf_w = parts["semantic_precision"]
     value = round(min(1.0, max(0.0, 0.5 * conf_w + 0.25 * legal_w + 0.25 * prec_w)), 4)
     return value
 
@@ -155,6 +186,13 @@ def buildable_envelope_v1(
             lir_geojson = None
 
     confidence = envelope_confidence(constraints, precision_by_source)
+    # Phase 16 (§25.1): the audited component decomposition + the composite the
+    # calibration model assigns to those components. The legacy scalar stays the
+    # headline value (snapshot stability); the components explain it.
+    components = envelope_confidence_components(constraints, precision_by_source)
+    composite_block: dict[str, object] | None = None
+    if components is not None:
+        composite_block = confidence_components(**components).to_dict()
 
     return BuildableEnvelope(
         id=f"env:{uuid.uuid4().hex[:8]}",
@@ -170,6 +208,9 @@ def buildable_envelope_v1(
             # area-attribution trace: which constraint removed which area (§30 caption).
             "removed_by": trace,
             "confidence_basis": "ranked by source legal_status + geometry_precision (§7.5)",
+            # §25.1 decomposition (Phase 16): None when no constraint shaped the
+            # envelope (the scalar's documented 0.6 fallback is itself the story).
+            "confidence_components": composite_block,
         },
     )
 

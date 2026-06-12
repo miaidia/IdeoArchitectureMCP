@@ -1,0 +1,72 @@
+# Plot Analyzer — minimal Kubernetes deployment (Phase 16; v1 plan 13.1.3).
+#
+# HONEST SCOPE: one combined-process Deployment (FastAPI /api + MCP
+# streamable-http /mcp, the same image the Dockerfile builds) + a Service.
+# The image reference is a PLACEHOLDER — build and push the repo Dockerfile to
+# your registry and patch `image:` (e.g. via kustomize). The API-key secret is
+# created OUT OF BAND (never committed):
+#
+#   kubectl create secret generic plot-analyzer-secrets \
+#     --from-literal=PLOT_API_KEYS="<key>:<role>:<tenant>,..."
+#
+# State caveats (see docs/RUNBOOK.md): the default artifact store is a LOCAL
+# directory (emptyDir here — artifacts do not survive a pod restart; configure
+# the S3/MinIO backend for persistence) and analysis/variant stores are
+# in-memory per process — run ONE replica unless an external store is wired.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: plot-analyzer
+  labels:
+    app.kubernetes.io/name: plot-analyzer
+spec:
+  replicas: 1  # in-memory stores are per-process; scale only with shared backends
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: plot-analyzer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: plot-analyzer
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001  # the Dockerfile's `plot` user
+      containers:
+        - name: plot-analyzer
+          # PLACEHOLDER — push the repo image and patch this reference:
+          image: plot-analyzer:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: plot-analyzer-secrets  # PLOT_API_KEYS lives ONLY here
+          env:
+            - name: PLOT_DEV_HOT_RELOAD
+              value: "false"  # dev-only tools stay off in production (§10.3)
+          readinessProbe:
+            httpGet:
+              path: /api/healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 2Gi  # geometry/render peaks; no CPU limit (avoid throttling)
+          volumeMounts:
+            - name: artifacts
+              mountPath: /app/.artifacts
+      volumes:
+        - name: artifacts
+          emptyDir: {}  # NON-persistent; use the S3/MinIO artifact backend in prod

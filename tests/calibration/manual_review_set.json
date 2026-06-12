@@ -1,0 +1,131 @@
+{
+  "description": "Manual expert-review set for §25.1 confidence calibration (F-0552/F-0560). Each case is a hand-labeled situation: the §25.1 component inputs a real pipeline stage would produce, plus the band an expert assigns by POLICY reasoning (high = trustworthy with evidence; moderate = show reservations; low = needs human confirmation; hint = never a basis for decisions). Labels were assigned from the §25.1 policy descriptions, not from the formula.",
+  "bands": {
+    "high": ">= 0.85",
+    "moderate": "0.60 - 0.84",
+    "low": "0.35 - 0.59",
+    "hint": "< 0.35"
+  },
+  "cases": [
+    {
+      "id": "uldk_cadastral_geometry",
+      "description": "Parcel geometry from ULDK (official register), current, cadastral precision, unambiguous payload.",
+      "components": {"source_authority": 0.95, "source_freshness": 0.9, "geometry_precision": 0.95, "semantic_precision": 0.9},
+      "expected_band": "high"
+    },
+    {
+      "id": "mpzp_indicator_regex_clean",
+      "description": "MPZP indicator extracted deterministically (regex) from the official uchwala text with a verbatim citation.",
+      "components": {"source_authority": 0.8, "parser_confidence": 0.95, "semantic_precision": 0.9, "source_freshness": 0.85},
+      "expected_band": "high"
+    },
+    {
+      "id": "llm_parse_scanned_pdf_unverified",
+      "description": "LLM candidate extraction from a scanned user PDF, weak parser score, ambiguous wording, no verification.",
+      "components": {"source_authority": 0.5, "parser_confidence": 0.45, "semantic_precision": 0.5},
+      "expected_band": "low"
+    },
+    {
+      "id": "flood_wfs_informative_fresh",
+      "description": "Flood layer from a current informative WFS (not binding), topographic-grade geometry.",
+      "components": {"source_authority": 0.75, "source_freshness": 0.9, "geometry_precision": 0.8, "semantic_precision": 0.8},
+      "expected_band": "moderate"
+    },
+    {
+      "id": "heritage_raster_derived_stale",
+      "description": "Heritage zone digitized from a stale raster source; usable with explicit reservations.",
+      "components": {"source_authority": 0.75, "source_freshness": 0.4, "geometry_precision": 0.65, "semantic_precision": 0.7},
+      "expected_band": "moderate"
+    },
+    {
+      "id": "rule_decided_measured_geometry",
+      "description": "WT rule decided pass/fail from geometry-measured inputs (no assumptions).",
+      "components": {"ruleset_certainty": 0.9, "semantic_precision": 0.95, "geometry_precision": 0.95},
+      "expected_band": "high"
+    },
+    {
+      "id": "rule_decided_with_assumed_windowed",
+      "description": "WT rule decided, but on the declared conservative windowed_walls assumption instead of measured data.",
+      "components": {"ruleset_certainty": 0.9, "semantic_precision": 0.65},
+      "expected_band": "moderate"
+    },
+    {
+      "id": "rule_unknown_missing_input",
+      "description": "Hard rule could not be verified (missing input); conservative mode reports a potential blocker.",
+      "components": {"ruleset_certainty": 0.2, "semantic_precision": 0.95},
+      "expected_band": "low"
+    },
+    {
+      "id": "manual_expert_confirmed_mediocre_sources",
+      "description": "Expert confirmed the claim, but the underlying sources stay mediocre — confirmation cannot mint authority.",
+      "components": {"source_authority": 0.7, "semantic_precision": 0.7, "manual_verification": 0.95},
+      "expected_band": "moderate"
+    },
+    {
+      "id": "cross_source_agreement_strong",
+      "description": "Two independent fresh sources agree on the claim; high-quality geometry.",
+      "components": {"source_authority": 0.8, "cross_source_agreement": 0.95, "source_freshness": 0.9, "geometry_precision": 0.9, "semantic_precision": 0.85},
+      "expected_band": "high"
+    },
+    {
+      "id": "cross_source_conflict",
+      "description": "Sources CONFLICT on the claim (agreement 0.3) — needs human confirmation no matter how good the rest is.",
+      "components": {"source_authority": 0.8, "cross_source_agreement": 0.3, "semantic_precision": 0.8, "source_freshness": 0.9},
+      "expected_band": "low"
+    },
+    {
+      "id": "quick_screening_partial_sources",
+      "description": "Quick screening with one theme degraded; remaining layers fresh and informative.",
+      "components": {"source_authority": 0.75, "source_freshness": 0.85, "geometry_precision": 0.8, "semantic_precision": 0.75},
+      "expected_band": "moderate"
+    },
+    {
+      "id": "archived_superseded_plan",
+      "description": "Provision from an ARCHIVED, superseded plan — historically interesting, never a basis for decisions.",
+      "components": {"source_authority": 0.9, "source_freshness": 0.05},
+      "expected_band": "hint"
+    },
+    {
+      "id": "user_sketch_geometry",
+      "description": "Geometry from a user-drawn sketch (approximate precision, auxiliary authority).",
+      "components": {"source_authority": 0.4, "geometry_precision": 0.5, "semantic_precision": 0.7},
+      "expected_band": "low"
+    },
+    {
+      "id": "survey_grade_with_manual_check",
+      "description": "Survey-grade geometry, official source, expert verified — the best the system can know.",
+      "components": {"source_authority": 0.95, "geometry_precision": 1.0, "semantic_precision": 0.95, "manual_verification": 1.0, "source_freshness": 0.95},
+      "expected_band": "high"
+    },
+    {
+      "id": "parser_redacted_fragment",
+      "description": "Indicator whose source fragment was security-redacted — citation no longer verifiable.",
+      "components": {"source_authority": 0.5, "parser_confidence": 0.6, "semantic_precision": 0.4},
+      "expected_band": "low"
+    },
+    {
+      "id": "no_components_measurable",
+      "description": "Nothing measurable (e.g. envelope with zero constraint data) — unknown stays unknown.",
+      "components": {},
+      "expected_band": "hint"
+    },
+    {
+      "id": "uniformly_mediocre",
+      "description": "Every component mediocre (0.6) — moderate by construction, reservations shown.",
+      "components": {"source_authority": 0.6, "source_freshness": 0.6, "geometry_precision": 0.6, "semantic_precision": 0.6, "parser_confidence": 0.6, "cross_source_agreement": 0.6, "ruleset_certainty": 0.6, "manual_verification": 0.6},
+      "expected_band": "moderate"
+    },
+    {
+      "id": "strong_data_dead_ruleset_link",
+      "description": "Excellent data but the rule itself is essentially unevaluable (certainty 0.05) — the outcome is a hint.",
+      "components": {"source_authority": 0.9, "source_freshness": 0.9, "geometry_precision": 0.9, "semantic_precision": 0.9, "ruleset_certainty": 0.05},
+      "expected_band": "hint"
+    },
+    {
+      "id": "monitoring_change_confirmed_fresh",
+      "description": "Monitoring detected a change, confirmed by a second source, maximally fresh.",
+      "components": {"source_authority": 0.85, "source_freshness": 1.0, "semantic_precision": 0.8, "cross_source_agreement": 0.9},
+      "expected_band": "high"
+    }
+  ]
+}

@@ -5,6 +5,16 @@ ORM lives in :mod:`plot_domain.db`, which is intentionally NOT imported here so
 importing the domain models never pulls in SQLAlchemy / GeoAlchemy2.
 """
 
+from plot_domain.confidence import (
+    COMPONENT_NAMES,
+    COMPONENT_WEIGHTS,
+    THRESHOLD_HIGH,
+    THRESHOLD_LOW,
+    THRESHOLD_MODERATE,
+    CompositeConfidence,
+    band_for,
+    confidence_components,
+)
 from plot_domain.enums import (
     AnalysisMode,
     AnalysisStatus,
@@ -62,6 +72,15 @@ __version__ = "0.1.0"
 __all__ = [
     # result envelope
     "ModuleResult",
+    # composite confidence (§25.1)
+    "COMPONENT_NAMES",
+    "COMPONENT_WEIGHTS",
+    "THRESHOLD_HIGH",
+    "THRESHOLD_LOW",
+    "THRESHOLD_MODERATE",
+    "CompositeConfidence",
+    "band_for",
+    "confidence_components",
     # enums
     "AnalysisMode",
     "AnalysisStatus",

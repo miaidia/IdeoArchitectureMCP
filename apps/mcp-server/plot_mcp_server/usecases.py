@@ -547,7 +547,19 @@ def planning_parse_document(
             confidence=ext.confidence,
         )
         evidence.append(ev.model_dump(mode="json"))
-        indicators.append(indicator.model_dump(mode="json"))
+        indicator_dump = indicator.model_dump(mode="json")
+        # §25.1 decomposition (Phase 16): a user-supplied document is an
+        # auxiliary source (never an official register), the extraction score is
+        # the parser component, and a redacted fragment lowers semantic
+        # precision (the citation is no longer fully verifiable).
+        from plot_domain import confidence_components as _compose_confidence
+
+        indicator_dump["confidence_components"] = _compose_confidence(
+            source_authority=0.5,
+            parser_confidence=ext.confidence,
+            semantic_precision=0.4 if ext.redacted else 0.85,
+        ).to_dict()
+        indicators.append(indicator_dump)
 
     from plot_domain import UnknownItem as _UnknownItem
     from plot_domain.enums import Severity as _Severity

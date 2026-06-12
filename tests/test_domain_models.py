@@ -42,8 +42,13 @@ def _all_domain_models() -> list[type[pydantic.BaseModel]]:
 
 def _example_for(field: pydantic.fields.FieldInfo) -> Any:
     """Best-effort example value for a required field, by annotation."""
+    from typing import Literal
+
     ann = field.annotation
     origin = get_origin(ann)
+    # Literal -> first allowed value (e.g. ConfidenceBand on CompositeConfidence).
+    if origin is Literal:
+        return get_args(ann)[0]
     # Enum -> first member
     if inspect.isclass(ann) and issubclass(ann, enum.Enum):
         return next(iter(ann))

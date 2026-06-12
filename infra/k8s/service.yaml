@@ -1,0 +1,17 @@
+# Plot Analyzer — ClusterIP service in front of the combined app (Phase 16).
+# TLS termination / rate limiting are ingress concerns (README "deployment-scope
+# security") — pair this with your ingress controller of choice.
+apiVersion: v1
+kind: Service
+metadata:
+  name: plot-analyzer
+  labels:
+    app.kubernetes.io/name: plot-analyzer
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: plot-analyzer
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

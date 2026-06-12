@@ -161,13 +161,30 @@ class ReportModel(BaseModel):
 # model builders without a cycle; re-exported from plot_reports.koncepcja).
 # --------------------------------------------------------------------------- #
 def compliance_summary(checks: list[dict[str, Any]]) -> dict[str, Any]:
-    """Pass/fail/warning/unknown counts + failing rule ids (plan §11.1.7 item 2)."""
+    """Pass/fail/warning/unknown counts + failing rule ids (plan §11.1.7 item 2).
+
+    Phase 16 (§25.1 threshold policy applied in reports): any decided check whose
+    confidence falls below the moderate threshold (0.60 — "niskie zaufanie,
+    wymaga potwierdzenia") is flagged for manual review; the rule ids land in
+    ``manual_review_rule_ids`` and the renderers surface them. ``not_applicable``
+    checks are exempt (nothing was decided to confirm).
+    """
+    from plot_domain import THRESHOLD_MODERATE
+
     counts: dict[str, int] = {}
     for check in checks:
         status = str(check.get("status", "unknown"))
         counts[status] = counts.get(status, 0) + 1
     failing = sorted(
         {str(c.get("rule_id", "")) for c in checks if str(c.get("status")) == "fail"}
+    )
+    manual_review = sorted(
+        {
+            str(c.get("rule_id", ""))
+            for c in checks
+            if str(c.get("status")) != "not_applicable"
+            and float(c.get("confidence", 0.0)) < THRESHOLD_MODERATE
+        }
     )
     return {
         "pass": counts.get("pass", 0),
@@ -176,6 +193,9 @@ def compliance_summary(checks: list[dict[str, Any]]) -> dict[str, Any]:
         "unknown": counts.get("unknown", 0),
         "not_applicable": counts.get("not_applicable", 0),
         "failing_rule_ids": failing,
+        # §25.1 policy: confidence < 0.60 → wymaga potwierdzenia człowieka.
+        "manual_review_rule_ids": manual_review,
+        "manual_review_threshold": THRESHOLD_MODERATE,
     }
 
 
